@@ -1,0 +1,16 @@
+{
+    // Flake8の厳しすぎるチェックを一部無視する
+    "flake8.args": [
+        "--max-line-length=120",
+        "--ignore=E302,E305,W293,F401" 
+    ],
+    // Pylanceのインポートチェックがうるさい場合は
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "none",
+        "reportUnusedImport": "none"
+    },
+    // reForge本体を検索パスに追加
+    "python.analysis.extraPaths": [
+        "../../"
+    ]
+}

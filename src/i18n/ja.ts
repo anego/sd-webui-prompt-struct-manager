@@ -1,0 +1,89 @@
+export const ja = {
+  // App.vue
+  appName: "PSM",
+  expandAll: "全展開",
+  collapseAll: "全折畳",
+  import: "インポート",
+  apply: "反映",
+  applyAndClose: "反映＆閉じる (Ctrl+Shift+Enter)",
+  saveDir: "保存先フォルダパス",
+  save: "保存",
+  confirmFileDelete: "本当にファイルを削除しますか？",
+  
+  // Context Menu
+  newPromptBelow: "新規プロンプト (下)",
+  newGroupBelow: "新規グループ (下)",
+  insertUpPrompt: "上に挿入 (P)",
+  insertUpGroup: "上に挿入 (G)",
+  edit: "編集",
+  duplicate: "複製",
+  delete: "削除",
+
+  // PsmSideBar.vue
+  fileOperations: "ファイル操作",
+  newFile: "新規作成",
+  rename: "名前変更",
+  searchFilter: "検索フィルター",
+  searchPlaceholder: "タグ名など...",
+  uiScale: "表示サイズ (UI Scale)",
+  small: "小",
+  medium: "中",
+  large: "大",
+  language: "言語 (Language)",
+  toggleShortcut: "表示切替ショートカット (Global)",
+  clickToRecord: "クリックして設定",
+  recording: "キーを入力...",
+  clear: "クリア",
+  reset: "リセット",
+
+  // PsmTreePane.vue
+  addPrompt: "プロンプト追加",
+  addGroup: "グループ追加",
+  close: "閉じる",
+  clickToOpen: "クリックして開く",
+  openAndDrop: "開く / ドロップ",
+  addTo: "{name} に追加",
+  
+  // Components
+  generateConfirmTitle: "生成確認",
+  generateConfirmMessage: "プロンプトを反映して、画像生成を開始しますか？",
+  generate: "生成",
+  execute: "実行",
+  cancel: "キャンセル",
+  cancelEsc: "キャンセル (Esc)",
+  executeEnter: "実行 (Enter)",
+  
+  // File Dialogs
+  createNewFile: "新規ファイル作成",
+  fileName: "ファイル名",
+  create: "作成",
+  copyFile: "ファイル複製",
+  renameFile: "ファイル名変更",
+  importData: "WebUIからインポート",
+  copySource: "コピー元",
+  currentFile: "現在のファイル",
+  newFileName: "新しいファイル名 (.yaml)",
+  overwriteCurrent: "現在のファイルに上書き",
+  createAndSave: "新規作成して保存",
+  
+  // Edit Modal
+  editGroup: "グループ編集",
+  editPrompt: "プロンプト編集",
+  name: "名前 (表示用)",
+  promptContent: "プロンプト内容 (Prompt)",
+  weight: "重み (Weight)",
+  memo: "メモ",
+  add: "追加",
+  done: "完了",
+  
+  // Delete Dialog
+  deleteConfirmTitle: "削除確認",
+  reallyDelete: "本当によろしいですか？",
+  deleteGroupOnly: "グループ枠のみ削除 (子は維持)",
+  moveTo: "移動...",
+  roots: "ルート",
+  groups: "グループ",
+  noGroups: "有効なグループなし",
+  positive: "Positive",
+  negative: "Negative",
+};
