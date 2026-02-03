@@ -28,6 +28,8 @@ Stable Diffusion WebUI (Automatic1111 / Forge) 向けの、プロンプトを構
 
 Extensionをインストールすると、WebUI上に「📂 PSM」ボタン（または専用の開閉ボタン）が表示されます（※UIの配置による）。
 
+![Basic Operations](assets/PSM_basic_operations.gif)
+
 サイドバーの「言語 (Language)」切り替えスイッチで、日本語と英語を切り替えることができます。
 
 ### 初回セットアップ (Initial Setup)

@@ -28,6 +28,8 @@ This project has been tested with "Stable Diffusion WebUI reForge".
 
 Once installed, a "📂 PSM" button (or a dedicated toggle button) will appear on the WebUI.
 
+![Basic Operations](assets/PSM_basic_operations.gif)
+
 You can switch between Japanese and English using the "Language" toggle in the sidebar.
 
 ### Initial Setup
