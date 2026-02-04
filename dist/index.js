@@ -16069,7 +16069,8 @@ const zA = ce({
                 T(Re, {
                   variant: "text",
                   size: "large",
-                  onClick: M(uf)
+                  onClick: M(uf),
+                  "data-testid": "edit-cancel-btn"
                 }, {
                   default: J(() => [
                     be(Ee(M(t)("cancel")), 1)
@@ -30288,7 +30289,8 @@ const CR = ce({
                   }),
                   T(Re, {
                     color: "primary",
-                    onClick: s
+                    onClick: s,
+                    "data-testid": "create-file-btn"
                   }, {
                     default: J(() => [
                       be(Ee(M(n)("create")), 1)
@@ -31281,7 +31283,8 @@ const Ld = {
                         "prepend-inner-icon": "mdi-folder",
                         "hide-details": "",
                         class: "mb-2",
-                        onClick: s
+                        onClick: s,
+                        "data-testid": "setup-dir-input"
                       }, null, 8, ["modelValue", "label"]),
                       l[6] || (l[6] = V("div", { class: "text-caption text-grey text-left" }, " ※ Google Drive等の同期フォルダを指定するとバックアップが容易です。 ", -1))
                     ]),
@@ -31341,7 +31344,8 @@ const Ld = {
                         suffix: ".yaml",
                         "prepend-inner-icon": "mdi-file",
                         "hide-details": "",
-                        autofocus: ""
+                        autofocus: "",
+                        "data-testid": "setup-filename-input"
                       }, null, 8, ["modelValue"])
                     ]),
                     V("div", hM, [
@@ -31513,7 +31517,7 @@ const Ld = {
 }, CM = /* @__PURE__ */ Cn({
   __name: "App",
   setup(e) {
-    const { t } = Jr(), n = "2026/2/4 0:32:02", r = me({ new: !1, copy: !1, rename: !1, import: !1, generate: !1 }), i = me({ visible: !1, x: 0, y: 0, items: [] }), s = me({
+    const { t } = Jr(), n = "2026/2/5 1:49:30", r = me({ new: !1, copy: !1, rename: !1, import: !1, generate: !1 }), i = me({ visible: !1, x: 0, y: 0, items: [] }), s = me({
       show: !1,
       x: 0,
       y: 0,

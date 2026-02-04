@@ -103,7 +103,7 @@ const executeImport = async (mode: "overwrite" | "new") => {
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn @click="emit('update:newDialog', false)">{{ t('cancel') }}</v-btn>
-          <v-btn color="primary" @click="handleCreateFile">{{ t('create') }}</v-btn>
+          <v-btn color="primary" @click="handleCreateFile" data-testid="create-file-btn">{{ t('create') }}</v-btn>
         </v-card-actions>
       </v-card>
     </PsmModal>

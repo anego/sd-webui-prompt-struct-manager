@@ -207,7 +207,7 @@ const modalTitle = computed(() => {
           {{ t('delete') }}
         </v-btn>
         <v-spacer></v-spacer>
-        <v-btn variant="text" size="large" @click="cancelEdit"
+        <v-btn variant="text" size="large" @click="cancelEdit" data-testid="edit-cancel-btn"
           >{{ t('cancel') }}</v-btn
         >
         <v-btn

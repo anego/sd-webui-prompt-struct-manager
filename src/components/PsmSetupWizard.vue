@@ -69,6 +69,7 @@ const handleFinish = async () => {
                     hide-details
                     class="mb-2"
                     @click="pickDirLocal"
+                    data-testid="setup-dir-input"
                 ></v-text-field>
                 <div class="text-caption text-grey text-left">
                     ※ Google Drive等の同期フォルダを指定するとバックアップが容易です。
@@ -115,6 +116,7 @@ const handleFinish = async () => {
                     prepend-inner-icon="mdi-file"
                     hide-details
                     autofocus
+                    data-testid="setup-filename-input"
                 ></v-text-field>
             </div>
 
