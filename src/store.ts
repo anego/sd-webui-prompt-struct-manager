@@ -276,6 +276,27 @@ export const toggleGroupEnabled = async (group: PsmItem) => {
 };
 
 /**
+ * グループ内の子要素すべての enabled 状態を一括変更する
+ * @param group 対象グループ
+ * @param enabled true: 有効化, false: 無効化
+ */
+export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) => {
+  if (!group.children) return;
+  const walk = (nodes: PsmItem[]) => {
+    for (const node of nodes) {
+      if (!node) continue;
+      node.enabled = enabled;
+      // 再帰的に設定するか？一旦直下だけでなく全子孫に適用するのが「一括」として自然
+      if (node.is_group && node.children) {
+        walk(node.children);
+      }
+    }
+  };
+  walk(group.children);
+  await savePrompts();
+};
+
+/**
  * サーバーからYAMLファイル一覧を取得する
  * 取得後、選択中のファイルがなければ自動的に最初のファイルを選択する
  */
@@ -585,20 +606,33 @@ export const createYamlWithData = async (n: string, pos: PsmItem[], neg: PsmItem
   await loadPrompts();
 };
 
-export const getCompiledPrompts = (nodes: PsmItem[]): string => {
+export const getCompiledPrompts = (nodes: PsmItem[], separator = ", "): string => {
   const raw = nodes
     .filter((n) => n.enabled)
-    .map((n) =>
-      n.is_group && n.children
-        ? getCompiledPrompts(n.children)
-        : n.weight !== 1.0
-          ? `(${n.content}:${n.weight})`
-          : n.content,
-    )
+    .map((n) => {
+      if (n.is_group && n.children) {
+        if (n.isRandom) {
+          // ランダムグループ: {A|B|C}
+          const content = getCompiledPrompts(n.children, "|");
+          return content ? `{${content}}` : "";
+        } else {
+          // 通常グループ: A, B, C
+          return getCompiledPrompts(n.children, ", ");
+        }
+      } else {
+        // アイテム
+        return n.weight !== 1.0 ? `(${n.content}:${n.weight})` : n.content;
+      }
+    })
     .filter((s) => s)
-    .join(", ");
+    .join(separator);
     
-  return raw.replace(/,\s*,/g, ", ");
+  // 重複区切り文字の整理 (separatorがカンマの場合のみ調整が必要だが、パイプの場合は単純結合で良いはず)
+  // ただしパイプの場合も空要素があると || になる可能性があるのでfilter(s=>s)で排除済み
+  if (separator === ", ") {
+      return raw.replace(/,\s*,/g, ", ");
+  }
+  return raw;
 };
 
 export const setAllGroupsOpen = (open: boolean) => {

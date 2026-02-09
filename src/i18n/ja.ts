@@ -40,7 +40,12 @@ export const ja = {
   addPrompt: "プロンプト追加",
   addGroup: "グループ追加",
   close: "閉じる",
-  clickToOpen: "クリックして開く",
+  doubleClickToEdit: "ダブルクリックで編集",
+  randomModeOn: "ランダムモード: ON (生成時に1つ選択)",
+  randomModeOff: "ランダムモード: OFF (全て連結)",
+  randomReflection: "グループ内ランダム反映",
+  enableAll: "グループ内すべて有効化",
+  disableAll: "グループ内すべて無効化",
   openAndDrop: "開く / ドロップ",
   addTo: "{name} に追加",
   

@@ -14,6 +14,16 @@
 - **Tag Autocomplete Integration:** If `a1111-sd-webui-tagcomplete` is enabled, tag suggestions are available when typing prompts.
 - **Memo:** Attach memos to each prompt, viewable via tooltips.
 
+### 1.3 Random Group
+- **Dynamic Prompts Syntax:** Supports `{A|B|C}` syntax to select one prompt randomly from the group.
+- **Toggle Switch:** Easily toggle ON/OFF via the "Randomize Group" switch next to the group name.
+- **Visibility:** The group is highlighted with a purple dashed border when in Random Mode.
+
+### 1.4 Bulk Toggle
+- **Hover Actions:** Bulk action icons appear when hovering over the group header.
+- **Enable All:** Click `[☑☑]` to enable all items within the group.
+- **Disable All:** Click `[☒]` to disable all items within the group.
+
 ## 2. User Interface (UI/UX)
 
 ### 2.1 Group Map
