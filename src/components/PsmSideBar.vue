@@ -28,6 +28,25 @@ const emit = defineEmits<{
 
 const isRecording = ref(false);
 
+const localSearchQuery = ref(state.searchQuery);
+let debounceTimer: number | null = null;
+
+import { watch } from "vue";
+
+watch(localSearchQuery, (newVal) => {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = window.setTimeout(() => {
+    state.searchQuery = newVal;
+  }, 300);
+});
+
+// Update local if global changes externally (e.g. clear button elsewhere if any, or reset)
+watch(() => state.searchQuery, (newVal) => {
+  if (newVal !== localSearchQuery.value) {
+    localSearchQuery.value = newVal;
+  }
+});
+
 const handleRecordKey = (e: KeyboardEvent) => {
   e.preventDefault();
   e.stopPropagation();
@@ -162,7 +181,7 @@ onUnmounted(() => {
 
         <div class="text-caption text-grey mb-1">{{ t('searchFilter') }}</div>
         <v-text-field
-          v-model="state.searchQuery"
+          v-model="localSearchQuery"
           density="compact"
           variant="outlined"
           :placeholder="t('searchPlaceholder')"

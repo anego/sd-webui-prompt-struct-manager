@@ -275,4 +275,95 @@ test.describe("PSM E2E Test Suite", () => {
     
     await page.getByTestId("edit-cancel-btn").click();
   });
+
+  test("6. New Features (Random, Bulk, Escape)", async ({ page }) => {
+    const groupName = `Feat_Group_${uniq}`;
+    const p1Name = `P1_${uniq}`;
+    const p2Name = `P2_${uniq}`;
+
+    // 1. Create Group
+    await page.locator(".psm-pane-open").first().getByTestId("root-add-group").click();
+    await page.getByTestId("edit-name-input").locator("input").fill(groupName);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    
+    const group = page.locator(".group-container", { hasText: groupName }).first();
+    await expect(group).toBeVisible();
+
+    // 2. Random Group Toggle
+    // Verify initial state (not random)
+    await expect(group).not.toHaveClass(/random-mode-group/);
+    
+    // Toggle Switch (Find v-switch within group header)
+    const randomSwitch = group.locator(".v-switch").first();
+    await randomSwitch.click();
+    
+    // Verify Random Mode Style applied
+    await expect(group).toHaveClass(/random-mode-group/);
+
+    // 3. Bulk Toggle
+    // Add two items
+    // Item 1
+    await group.hover();
+    await group.getByTestId("inline-add-prompt").click();
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("c1");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(p1Name);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+
+    // Item 2
+    await group.hover();
+    await group.getByTestId("inline-add-prompt").click();
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("c2");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(p2Name);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+
+    const p1 = group.locator(".v-chip", { hasText: p1Name }).first();
+    const p2 = group.locator(".v-chip", { hasText: p2Name }).first();
+
+    // Disable All
+    await group.hover(); // Restore hover to show buttons
+    const disableAllBtn = group.locator("button[title='Disable All in Group']");
+    await disableAllBtn.click();
+    await page.waitForTimeout(200); // Wait for store update
+
+    // Verify both disabled (using class check or opacity expectation)
+    await expect(p1.locator(".text-decoration-line-through")).toBeVisible();
+    await expect(p2.locator(".text-decoration-line-through")).toBeVisible();
+
+    // Enable All
+    await group.hover();
+    const enableAllBtn = group.locator("button[title='Enable All in Group']");
+    await enableAllBtn.click();
+    await page.waitForTimeout(200);
+
+    // Verify both enabled
+    await expect(p1.locator(".text-decoration-line-through")).not.toBeVisible();
+    await expect(p2.locator(".text-decoration-line-through")).not.toBeVisible();
+
+    // 4. Prompt Escaping (UI Persistence Check)
+    // Add item with parentheses
+    const escapeContent = "test (escape)";
+    const escapeName = `Esc_${uniq}`;
+    
+    await group.hover();
+    await group.getByTestId("inline-add-prompt").click();
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill(escapeContent);
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(escapeName);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+
+    // Re-open edit to verify it wasn't double escaped or modified in storage view
+    const escItem = group.locator(".v-chip", { hasText: escapeName }).first();
+    await escItem.dblclick();
+
+    // Value in textarea should remain "test (escape)", NOT "test \(escape\)"
+    // Escaping happens ONLY during compilation/generation, not in storage/UI.
+    await expect(page.getByTestId("edit-content-input").locator("textarea").first()).toHaveValue(escapeContent);
+    await page.getByTestId("edit-cancel-btn").click();
+  });
 });

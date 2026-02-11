@@ -621,7 +621,13 @@ export const getCompiledPrompts = (nodes: PsmItem[], separator = ", "): string =
         }
       } else {
         // アイテム
-        return n.weight !== 1.0 ? `(${n.content}:${n.weight})` : n.content;
+        // コンテンツ内の () をエスケープする
+        let content = n.content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+        
+        // 末尾のカンマや空白を除去 (例: "foo, " -> "foo")
+        content = content.replace(/,\s*$/, "").trim();
+
+        return n.weight !== 1.0 ? `(${content}:${n.weight})` : content;
       }
     })
     .filter((s) => s)
