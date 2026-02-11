@@ -115,6 +115,18 @@ const modalTitle = computed(() => {
           class="mb-2"
         ></v-text-field>
 
+        <!-- Random Mode Switch for Groups -->
+        <v-switch
+          v-if="state.editingItem.is_group"
+          v-model="state.editingItem.isRandom"
+          color="purple-accent-2"
+          :label="state.editingItem.isRandom ? t('randomModeOn') : t('randomModeOff')"
+          density="compact"
+          inset
+          hide-details
+          class="mb-2"
+        ></v-switch>
+
         <v-textarea
           v-if="!state.editingItem.is_group"
           ref="contentInputRef"

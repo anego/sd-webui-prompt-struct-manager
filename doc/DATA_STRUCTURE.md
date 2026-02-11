@@ -14,6 +14,7 @@ export interface PsmItem {
   memo?: string;        // ユーザー用メモ
   
   is_group: boolean;    // グループか否か
+  isRandom?: boolean;   // ランダムグループ (Dynamic Prompts {A|B} 形式で出力)
   isOpen?: boolean;     // グループの場合の開閉状態 (UI用)
   children?: PsmItem[]; // 子アイテムの配列 (is_group: true の場合)
   

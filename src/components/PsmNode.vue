@@ -12,6 +12,7 @@ import {
   addItem,
   toggleGroupEnabled,
   teleportItem,
+  setGroupChildrenEnabled,
 } from "../store";
 import { PsmItem } from "../types";
 import { useI18n } from "../composables/useI18n";
@@ -241,9 +242,10 @@ const moveSelf = (dir: 'up' | 'down') => {
     <div
       v-if="item.is_group"
       class="group-container rounded border pa-1"
-      :class="
-        isEffectiveEnabled ? 'bg-grey-darken-4' : 'bg-grey-darken-4 opacity-50'
-      "
+      :class="[
+        isEffectiveEnabled ? 'bg-grey-darken-4' : 'bg-grey-darken-4 opacity-50',
+        item.isRandom ? 'random-mode-group' : ''
+      ]"
     >
       <div class="top-add-zone d-flex justify-start ga-2 mb-1">
         <v-btn
@@ -307,20 +309,63 @@ const moveSelf = (dir: 'up' | 'down') => {
         </v-icon>
 
         <span
-          class="text-subtitle-2 font-weight-bold flex-grow-1 text-truncate text-left"
+          class="text-subtitle-2 font-weight-bold ml-0 text-truncate text-left"
           :class="{ 'text-grey': !isEffectiveEnabled }"
           data-testid="group-label"
+          style="max-width: 40%"
           @dragenter="handleGroupMouseOver"
           @dragleave="handleGroupMouseLeave"
           @dragover.prevent
         >
           {{ item.name }}
-          <span 
-            class="text-caption ml-2"
-            :class="counts.active > 0 ? 'text-primary font-weight-bold' : 'text-grey font-weight-regular'"
+        </span>
+
+        <!-- Inline Random Switch -->
+        <v-switch
+          v-model="item.isRandom"
+          color="purple-accent-2"
+          density="compact"
+          hide-details
+          inset
+          :label="t('randomReflection')"
+          @update:modelValue="savePrompts"
+          @click.stop
+          class="ml-4"
+          style="min-width: 150px"
+        ></v-switch>
+
+        <!-- Bulk Toggle Buttons (Show on Hover) -->
+        <div class="action-buttons d-flex align-center ga-1 ml-4">
+          <v-btn
+            icon
+            size="x-small"
+            variant="text"
+            color="primary"
+            @click.stop="setGroupChildrenEnabled(item, true)"
+            :title="t('enableAll')"
           >
-            ({{ counts.active }}/{{ counts.total }})
-          </span>
+            <v-icon>mdi-check-all</v-icon>
+          </v-btn>
+          <v-btn
+            icon
+            size="x-small"
+            variant="text"
+            color="grey"
+            style="opacity: 0.7;"
+            @click.stop="setGroupChildrenEnabled(item, false)"
+            :title="t('disableAll')"
+          >
+            <v-icon>mdi-close-box-multiple-outline</v-icon>
+          </v-btn>
+        </div>
+
+        <v-spacer></v-spacer>
+
+        <span 
+          class="text-caption mr-2 flex-grow-0 flex-shrink-0"
+          :class="counts.active > 0 ? 'text-primary font-weight-bold' : 'text-grey font-weight-regular'"
+        >
+          ({{ counts.active }}/{{ counts.total }})
         </span>
       </div>
       
@@ -468,7 +513,7 @@ const moveSelf = (dir: 'up' | 'down') => {
 }*/
 
 .group-container .action-buttons {
-  opacity: 0.5;
+  opacity: 0;
   transition: opacity 0.2s;
 }
 .group-container:hover .action-buttons {
@@ -499,6 +544,11 @@ const moveSelf = (dir: 'up' | 'down') => {
   background-color: rgba(255, 152, 0, 0.15) !important;
 }
 
+.random-mode-group {
+  border: 1px dashed #E040FB !important; /* Purple Accent */
+  background-color: rgba(224, 64, 251, 0.1) !important;
+}
+
 /* Scale Classes */
 .text-scale-small {
   font-size: 0.85rem !important; /* ~13.6px -> Target 14pxish */
@@ -514,4 +564,16 @@ const moveSelf = (dir: 'up' | 'down') => {
   font-weight: 500;
 }
 
+
+/* Switch Label Style */
+:deep(.v-switch .v-label) {
+  font-size: 0.75rem !important;
+  opacity: 1 !important;
+  color: #BDBDBD; /* Grey lighten-1 approx */
+  white-space: nowrap;
+}
+:deep(.v-switch.v-input--is-label-active .v-label) {
+  color: #E040FB !important; /* Purple Accent 2 */
+  font-weight: bold;
+}
 </style>

@@ -14,6 +14,7 @@ export interface PsmItem {
   memo?: string;        // User memo
   
   is_group: boolean;    // Is group or not
+  isRandom?: boolean;   // Random group (Output in Dynamic Prompts {A|B} format)
   isOpen?: boolean;     // Expansion state for group (UI)
   children?: PsmItem[]; // Children array (if is_group: true)
   

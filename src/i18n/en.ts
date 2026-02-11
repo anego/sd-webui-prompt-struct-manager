@@ -39,7 +39,12 @@ export const en = {
   addPrompt: "Add Prompt",
   addGroup: "Add Group",
   close: "Close",
-  clickToOpen: "Click to open",
+  doubleClickToEdit: "Double click to edit",
+  randomModeOn: "Random Mode: ON (Select one)",
+  randomModeOff: "Random Mode: OFF (Concat all)",
+  randomReflection: "Randomize Group",
+  enableAll: "Enable All in Group",
+  disableAll: "Disable All in Group",
   openAndDrop: "Open / Drop",
   addTo: "Add to {name}",
   
