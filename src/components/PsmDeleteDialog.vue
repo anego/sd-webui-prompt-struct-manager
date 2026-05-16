@@ -103,7 +103,7 @@ const executeDelete = async (mode: "all" | "only") => {
             {{ item.name || item.content }}
           </div>
 
-          <div class="d-flex flex-column gap-3">
+          <div class="psm-delete-dialog__actions d-flex flex-column">
             <v-btn
               v-if="item?.is_group"
               ref="btnGroupOnly"
@@ -142,8 +142,12 @@ const executeDelete = async (mode: "all" | "only") => {
   </PsmModal>
 </template>
 
-<style scoped>
-.gap-3 {
-  gap: 12px;
+<style scoped lang="scss">
+@use "../styles/variables" as *;
+
+.psm-delete-dialog {
+  &__actions {
+    gap: $spacing-md;
+  }
 }
 </style>

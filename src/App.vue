@@ -16,6 +16,8 @@ import {
   duplicateItem,
   startDeleteConfirm,
   findParentAndItem,
+  detectDuplicates,
+  clearDuplicateHighlight,
 } from "./store";
 import { PsmItem } from "./types";
 import PsmEditModal from "./components/PsmEditModal.vue";
@@ -26,6 +28,7 @@ import PsmFileDialogs from "./components/PsmFileDialogs.vue";
 import PsmContextMenu from "./components/PsmContextMenu.vue";
 import PsmGroupMap from "./components/PsmGroupMap.vue";
 import PsmGenerateConfirmDialog from "./components/PsmGenerateConfirmDialog.vue";
+import PsmDuplicateConfirmDialog from "./components/PsmDuplicateConfirmDialog.vue";
 import PsmSetupWizard from "./components/PsmSetupWizard.vue";
 import { useI18n } from "./composables/useI18n";
 
@@ -35,6 +38,7 @@ const buildTimestamp = __BUILD_TIMESTAMP__;
 
 // ダイアログの表示状態管理
 const dialogs = ref({ new: false, copy: false, rename: false, import: false, generate: false });
+const duplicateDialog = ref({ show: false, mode: "warn" as "warn" | "error" });
 const menuState = ref({ visible: false, x: 0, y: 0, items: [] as any[] });
 
 // 右クリックメニューの状態
@@ -109,7 +113,37 @@ const handleApply = () => {
     }
   };
   updateTextarea(`#${prefix}_prompt`, posStr);
+  updateTextarea(`#${prefix}_prompt`, posStr);
   updateTextarea(`#${prefix}_neg_prompt`, negStr);
+};
+
+/**
+ * 反映処理の前に重複チェックを行うラッパー
+ */
+const handleApplyWithCheck = () => {
+  if (state.duplicateCheckMode === "none") {
+    clearDuplicateHighlight();
+    handleApply();
+    state.isVisible = false;
+    return;
+  }
+
+  const duplicates = detectDuplicates();
+  if (duplicates.size > 0) {
+    state.duplicateTexts = duplicates;
+    state.duplicateHighlightLevel = state.duplicateCheckMode;
+    duplicateDialog.value.mode = state.duplicateCheckMode;
+    duplicateDialog.value.show = true;
+  } else {
+    clearDuplicateHighlight();
+    handleApply();
+    state.isVisible = false;
+  }
+};
+
+const forceApplyAndClose = () => {
+  handleApply();
+  state.isVisible = false;
 };
 
 /**
@@ -170,7 +204,7 @@ const handleKeyboardContextMenu = async () => {
   
   // DOM要素を取得してメニューを表示位置を決定
   // IDが付与されていないためクラス名で検索
-  const focusedEl = document.querySelector("#psm_app_root_container .focused");
+  const focusedEl = document.querySelector("#psm_app_root_container .psm-node--focused");
   
   if (focusedEl) {
     const rect = focusedEl.getBoundingClientRect();
@@ -267,10 +301,8 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     e.stopPropagation();
     e.stopImmediatePropagation();
     
-    // 反映
-    handleApply();
-    // 閉じる
-    state.isVisible = false;
+    // アプライ＆チェック
+    handleApplyWithCheck();
     return;
   }
 
@@ -315,6 +347,11 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
       dialogs.value.generate = false;
       return;
     }
+    if (duplicateDialog.value.show) {
+      duplicateDialog.value.show = false;
+      // errorモードでエスケープした場合は何もしない、warnモードの場合はcancel扱いなので同様に閉じるだけ
+      return;
+    }
 
     // プロンプト編集モーダルが開いている場合もメインパネルを閉じない
     if (state.isEditing) return;
@@ -332,9 +369,10 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   <div
     v-show="state.isVisible"
     id="psm_app_root_container"
+    class="psm-app-root"
     @click="menuState.visible = false"
   >
-    <v-app theme="dark" class="psm-vuetify-app">
+    <v-app theme="dark" class="psm-app-root__vuetify psm-scrollbar">
       <v-card class="d-flex flex-column h-100 w-100 rounded-0" elevation="0">
         <v-toolbar density="compact" color="surface" elevation="4">
           <v-toolbar-title class="text-subtitle-1 font-weight-bold text-orange">
@@ -377,7 +415,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
             variant="elevated"
             size="small"
             class="ml-2"
-            @click.stop="() => { handleApply(); state.isVisible = false; }"
+            @click.stop="handleApplyWithCheck"
             :title="t('applyAndClose')"
           >
             <v-icon start size="small">mdi-check-all</v-icon>
@@ -436,6 +474,13 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         v-model:importDialog="dialogs.import"
       />
       
+      <PsmDuplicateConfirmDialog
+        v-model="duplicateDialog.show"
+        :mode="duplicateDialog.mode"
+        @confirm="forceApplyAndClose"
+        @cancel="() => {}"
+      />
+      
       <PsmGenerateConfirmDialog
         v-model="dialogs.generate"
         @confirm="executeGenerate"
@@ -444,53 +489,19 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
   </div>
 </template>
 
-<style>
-  .v-overlay-container,
-  .psm-vuetify-app .v-overlay-container {
-    z-index: 20000 !important;
-  }
-</style>
+<style scoped lang="scss">
+@use "./styles/variables" as *;
 
-<style scoped>
-#psm_app_root_container {
+.psm-app-root {
   position: fixed;
   inset: 0;
-  z-index: 10000;
-  background: rgba(0, 0, 0, 0.7);
-}
-.psm-vuetify-app {
-  background: transparent !important;
-  width: 100%;
-  height: 100%;
-}
+  z-index: $z-index-app;
+  background: $color-overlay;
 
-/* Global DnD Styles */
-.sortable-ghost {
-  opacity: 0.4;
-  background-color: #2196f333 !important; /* Blue tint */
-  border: 1px dashed #2196f3;
+  &__vuetify.v-application {
+    background: transparent;
+    width: 100%;
+    height: 100%;
+  }
 }
-.sortable-drag {
-  cursor: grabbing;
-}
-/* Ensure empty drop zones have height */
-.vuedraggable-empty-state {
-  border-radius: 4px;
-  border: 1px dashed #ffffff40;
-}
-
-/* Global Scrollbar Styling */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: #1e1e1e; 
-}
-::-webkit-scrollbar-thumb {
-  background: #555; 
-  border-radius: 5px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #777; 
-}</style>
+</style>

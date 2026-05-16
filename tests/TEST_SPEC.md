@@ -35,6 +35,12 @@ We have consolidated all automated tests into a single E2E suite (`tests/e2e.spe
 ### 2.5 Mouse Operations
 - **Double Click**: Verify double-clicking an item/group opens the edit modal.
 
+### 2.6 Duplicate Detection
+- **Modes**: Verify "None", "Warn", and "Error" modes in the sidebar.
+- **Validation**: Verify duplicates across Positive/Negative are detected on Apply.
+- **Dialogs**: Verify Warning/Error dialogs appear and handle Confirm/Cancel/Enter/Esc correctly.
+- **Highlighting**: Verify items are highlighted in Yellow (`bg-warning`) or Red (`bg-error`) after detection.
+
 ## 3. Execution
 ```bash
 npx playwright test

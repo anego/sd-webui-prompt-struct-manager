@@ -35,6 +35,10 @@ export const ja = {
   recording: "キーを入力...",
   clear: "クリア",
   reset: "リセット",
+  duplicateCheckMode: "重複プロンプトのチェック",
+  checkNone: "チェックしない",
+  checkWarn: "警告を表示する",
+  checkError: "エラーで反映を停止する",
 
   // PsmTreePane.vue
   addPrompt: "プロンプト追加",
@@ -57,6 +61,10 @@ export const ja = {
   cancel: "キャンセル",
   cancelEsc: "キャンセル (Esc)",
   executeEnter: "実行 (Enter)",
+  duplicateWarnTitle: "重複プロンプトの警告",
+  duplicateWarnMessage: "有効なプロンプトに重複が見つかりました。\nこのまま反映しますか？",
+  duplicateErrorTitle: "重複プロンプトエラー",
+  duplicateErrorMessage: "有効なプロンプトに重複があるため反映できません。\n重複箇所を確認してください。",
   
   // File Dialogs
   createNewFile: "新規ファイル作成",

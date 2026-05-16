@@ -366,4 +366,79 @@ test.describe("PSM E2E Test Suite", () => {
     await expect(page.getByTestId("edit-content-input").locator("textarea").first()).toHaveValue(escapeContent);
     await page.getByTestId("edit-cancel-btn").click();
   });
+
+  test("7. Duplicate Prompt Detection (None, Warn, Error)", async ({ page }) => {
+    const uniq = Date.now().toString().slice(-4);
+    const dupContent = `Duplicate_${uniq}`;
+
+    // Helper to add a prompt
+    const addPrompt = async (paneIdx: number, content: string) => {
+      await page.locator(".psm-pane-open").nth(paneIdx).getByTestId("root-add-prompt").click();
+      await page.getByTestId("edit-content-input").locator("textarea").first().fill(content);
+      await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+      await page.getByTestId("edit-save-btn").click();
+    };
+
+    // 1. Prepare duplicates
+    await addPrompt(0, dupContent); // Positive
+    await addPrompt(1, dupContent); // Negative
+
+    // Ensure sidebar is open
+    if (!(await page.locator(".sidebar-container").isVisible())) {
+      await page.getByTestId("toggle-sidebar-btn").click();
+    }
+
+    // 2. Test Mode: None
+    await page.getByLabel("No Check").check();
+    await page.getByTitle("Apply & Close (Ctrl+Shift+Enter)").click();
+    // Panel should close immediately
+    await expect(page.locator("#psm_app_root_container")).not.toBeVisible();
+
+    // Re-open
+    await page.locator("#psm_mount_point").click(); // Assuming button to open
+
+    // 3. Test Mode: Warn
+    await page.getByLabel("Show Warning").check();
+    await page.getByTitle("Apply & Close (Ctrl+Shift+Enter)").click();
+
+    // Dialog should appear
+    const warnDialog = page.locator(".psm-custom-modal-overlay", { hasText: "Duplicate Prompt Warning" });
+    await expect(warnDialog).toBeVisible();
+
+    // Cancel Dialog
+    await warnDialog.getByText("Cancel (Esc)").click();
+    await expect(warnDialog).not.toBeVisible();
+
+    // Verify Highlight (Yellow/Warning)
+    // Vuetify warning color with variant="elevated" results in 'bg-warning'
+    const dupChips = page.locator(".v-chip", { hasText: dupContent });
+    await expect(dupChips.first()).toHaveClass(/bg-warning/); 
+
+    // Re-apply and Confirm
+    await page.getByTitle("Apply & Close (Ctrl+Shift+Enter)").click();
+    await warnDialog.getByText("Apply (Enter)").click();
+    await expect(page.locator("#psm_app_root_container")).not.toBeVisible();
+
+    // Re-open
+    await page.locator("#psm_mount_point").click();
+
+    // 4. Test Mode: Error
+    await page.getByLabel("Stop with Error").check();
+    await page.getByTitle("Apply & Close (Ctrl+Shift+Enter)").click();
+
+    // Error Dialog should appear
+    const errDialog = page.locator(".psm-custom-modal-overlay", { hasText: "Duplicate Prompt Error" });
+    await expect(errDialog).toBeVisible();
+
+    // Verify Highlight (Red/Error)
+    await expect(dupChips.first()).toHaveClass(/bg-error/);
+
+    // Close Dialog (Enter)
+    await page.keyboard.press("Enter");
+    await expect(errDialog).not.toBeVisible();
+    await expect(page.locator("#psm_app_root_container")).toBeVisible(); // Should still be open
+
+    // Cleanup: Remove duplicates or file to avoid mess
+    // (Optional but good for isolated tests)
+  });
 });

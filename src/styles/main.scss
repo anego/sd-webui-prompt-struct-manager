@@ -1,0 +1,124 @@
+/**
+ * Prompt Struct Manager (PSM) Global Styles
+ * BEM notation and common utilities
+ */
+@use "./variables" as *;
+
+/* -------------------------------------------------------------------------- */
+/* Utilities & Resets                                                         */
+/* -------------------------------------------------------------------------- */
+.psm-cursor-grab {
+  cursor: grab;
+}
+
+.psm-cursor-pointer {
+  cursor: pointer;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Scrollbar (psm-scrollbar)                                                  */
+/* -------------------------------------------------------------------------- */
+.psm-scrollbar {
+  &::-webkit-scrollbar {
+    width: $size-scrollbar;
+    height: $size-scrollbar;
+  }
+  &::-webkit-scrollbar-track {
+    background: $color-bg-base;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: $color-text-dark;
+    border-radius: $radius-md;
+    
+    &:hover {
+      background: $color-text-hover;
+    }
+  }
+
+  &--dynamic {
+    &::-webkit-scrollbar {
+      width: 1.5em; /* dynamically based on font-size */
+    }
+    &::-webkit-scrollbar-track {
+      background: $color-bg-panel;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: $color-text-dark;
+      border-radius: $radius-pill; /* rounded pill */
+      border: 0.35em solid $color-bg-panel; /* border scales too */
+      
+      &:hover {
+        background: $color-text-hover;
+      }
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Drag and Drop (psm-dnd)                                                    */
+/* -------------------------------------------------------------------------- */
+body .psm-app-root .psm-dnd {
+  &__ghost {
+    opacity: 0.4;
+    background-color: $color-primary-light-1; /* Blue tint */
+    border: 1px dashed $color-primary;
+  }
+  &__drag {
+    cursor: grabbing;
+  }
+  &__empty-state {
+    border-radius: $radius-sm;
+    border: 1px dashed $color-border-lighter;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modals (psm-modal)                                                         */
+/* -------------------------------------------------------------------------- */
+html body .psm-modal {
+  &__overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: $z-index-modal; /* Extremely high z-index */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+  }
+
+  &__backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: $color-overlay;
+    z-index: -1;
+  }
+
+  &__content {
+    position: relative;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    z-index: 1;
+
+    .v-card {
+      width: 100%;
+    }
+  }
+}
+
+/* Global Vuetify Overlay fixes */
+html body .v-overlay-container,
+html body .psm-app-root .v-overlay-container {
+  z-index: $z-index-overlay;
+}
+
+/* Tag Autocomplete Override */
+html body .autocompleteParent {
+  z-index: $z-index-autocomplete;
+}

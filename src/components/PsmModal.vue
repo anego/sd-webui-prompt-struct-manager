@@ -51,51 +51,11 @@ onUnmounted(() => window.removeEventListener("keydown", handleKeydown));
 
 <template>
   <Teleport to="#psm_vue_app_overlay">
-    <div v-if="modelValue" class="psm-custom-modal-overlay" @click.stop>
-      <div class="psm-custom-modal-backdrop" @click="clickOutsideToClose !== false && close()"></div>
-      <div class="psm-custom-modal-content" :style="{ maxWidth: maxWidth ? `${maxWidth}px` : '600px' }">
+    <div v-if="modelValue" class="psm-modal__overlay" @click.stop>
+      <div class="psm-modal__backdrop" @click="clickOutsideToClose !== false && close()"></div>
+      <div class="psm-modal__content" :style="{ maxWidth: maxWidth ? `${maxWidth}px` : '600px' }">
         <slot></slot>
       </div>
     </div>
   </Teleport>
 </template>
-
-<style>
-/* Global styles to ensure these bypass any scoping */
-.psm-custom-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 2000000000 !important; /* Extremely high z-index */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-}
-
-.psm-custom-modal-backdrop {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.7);
-  z-index: -1;
-}
-
-.psm-custom-modal-content {
-  position: relative;
-  width: 100%;
-  max-height: 90vh;
-  overflow-y: auto;
-  z-index: 1;
-  /* Reset Vuetify theme context slightly if needed, though usually inherited from app */
-}
-
-/* Ensure Vuetify components inside look correct */
-.psm-custom-modal-content .v-card {
-  width: 100%;
-}
-</style>

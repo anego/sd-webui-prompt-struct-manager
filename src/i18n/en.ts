@@ -34,6 +34,10 @@ export const en = {
   clickToRecord: "Click to record",
   recording: "Press keys...",
   clear: "Clear",
+  duplicateCheckMode: "Duplicate Prompt Check",
+  checkNone: "No Check",
+  checkWarn: "Show Warning",
+  checkError: "Stop with Error",
 
   // PsmTreePane.vue
   addPrompt: "Add Prompt",
@@ -56,6 +60,10 @@ export const en = {
   cancel: "Cancel",
   cancelEsc: "Cancel (Esc)",
   executeEnter: "Execute (Enter)",
+  duplicateWarnTitle: "Duplicate Prompt Warning",
+  duplicateWarnMessage: "Duplicate prompts found.\nApply anyway?",
+  duplicateErrorTitle: "Duplicate Prompt Error",
+  duplicateErrorMessage: "Cannot apply due to duplicate prompts.\nPlease fix duplicates first.",
   
   // File Dialogs
   createNewFile: "Create New File",

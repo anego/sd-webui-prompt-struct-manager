@@ -77,21 +77,21 @@ const scrollToNode = (id: number) => {
 
 <template>
   <div
-    class="psm-group-map-container"
+    class="psm-group-map"
     :class="{ 'is-active': isHovered }"
     @mouseenter="isHovered = true"
     @mouseleave="isHovered = false"
   >
     <!-- Trigger Area (Always visible transparent strip) -->
-    <div class="trigger-strip d-flex align-center justify-center flex-column">
-      <span class="trigger-label text-caption font-weight-bold text-grey-lighten-2">
+    <div class="psm-group-map__trigger d-flex align-center justify-center flex-column">
+      <span class="psm-group-map__label text-caption font-weight-bold text-grey-lighten-2">
         Positive Prompt Group Map
       </span>
       <v-icon size="small" class="mt-1 text-grey-lighten-2">mdi-chevron-left</v-icon>
     </div>
 
     <!-- Content Area -->
-    <div class="map-content bg-grey-darken-3 elevation-4 rounded-s-lg border-s border-grey-darken-1">
+    <div class="psm-group-map__content bg-grey-darken-3 elevation-4 rounded-s-lg border-s border-grey-darken-1">
       <div v-if="groupList.length === 2" class="pa-4 text-caption text-grey text-center">
         No Groups
       </div>
@@ -104,7 +104,7 @@ const scrollToNode = (id: number) => {
           <!-- Group Item -->
           <div
             v-else
-            class="py-1 map-item cursor-pointer d-flex align-center"
+            class="py-1 psm-group-map__item cursor-pointer d-flex align-center"
             @click="scrollToNode(item.id)"
             :title="item.name"
             :class="!item.enabled ? 'text-grey text-decoration-line-through' : ''"
@@ -139,62 +139,66 @@ const scrollToNode = (id: number) => {
   </div>
 </template>
 
-<style scoped>
-.psm-group-map-container {
+<style scoped lang="scss">
+@use "../styles/variables" as *;
+
+div.psm-group-map {
   position: fixed;
   top: 100px;
   right: 0;
   bottom: 50px;
-  z-index: 20000; /* Ensure it is above other overlays */
+  z-index: $z-index-overlay; /* Ensure it is above other overlays */
   display: flex;
   pointer-events: none;
   pointer-events: auto;
-}
 
-.trigger-strip {
-  width: 24px; /* Increased width for label */
-  height: 100%;
-  background: rgba(0, 0, 0, 0.4); /* Darker initial background */
-  border-left: 1px solid rgba(255, 255, 255, 0.2);
-  transition: all 0.2s;
-  backdrop-filter: blur(4px);
-  cursor: pointer;
-}
-.trigger-strip:hover {
-  background: rgba(33, 150, 243, 0.3); /* Blue hint on hover */
-  width: 28px; /* Slight expansion */
-}
+  /* Actions on hover state */
+  &.is-active div.psm-group-map__content {
+    margin-right: 0;
+    opacity: 1;
+  }
 
-.trigger-label {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  letter-spacing: 2px;
-  user-select: none;
-  opacity: 0.8;
-}
+  div.psm-group-map__trigger {
+    width: 24px; /* Increased width for label */
+    height: 100%;
+    background: $color-overlay-light; /* Darker initial background */
+    border-left: 1px solid $color-border-light;
+    transition: all 0.2s;
+    backdrop-filter: blur(4px);
+    cursor: pointer;
 
-/* Container for the sliding pane */
-.map-content {
-  width: 260px;
-  height: auto;
-  align-self: flex-start;
-  margin-right: -260px;
-  opacity: 0;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  /* Solid background to prevent see-through */
-  background-color: #1E1E1E !important; 
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.5); /* Stronger shadow */
-  border-left: 1px solid #444;
-}
+    &:hover {
+      background: $color-primary-light-2; /* Blue hint on hover */
+      width: 28px; /* Slight expansion */
+    }
+  }
 
-/* Actions on hover state */
-.psm-group-map-container.is-active .map-content {
-  margin-right: 0;
-  opacity: 1;
-}
+  span.psm-group-map__label {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    letter-spacing: 2px;
+    user-select: none;
+    opacity: 0.8;
+  }
 
-.map-item:hover {
-  background-color: rgba(33, 150, 243, 0.2); /* Use primary color hint */
-  color: white !important;
+  div.psm-group-map__content {
+    width: 260px;
+    height: auto;
+    align-self: flex-start;
+    margin-right: -260px;
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* Solid background to prevent see-through */
+    background-color: $color-bg-base; 
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.5); /* Stronger shadow */
+    border-left: 1px solid $color-border-dark;
+  }
+
+  div.psm-group-map__item {
+    &:hover {
+      background-color: $color-primary-light-1; /* Use primary color hint */
+      color: white;
+    }
+  }
 }
 </style>

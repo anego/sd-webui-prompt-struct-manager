@@ -11,11 +11,12 @@ import {
   setUiScale,
   setLang,
   toggleSidebar,
-
   setToggleShortcut,
   pickDirectory,
   saveConfig,
   listFiles,
+  clearDuplicateHighlight,
+  setDuplicateCheckMode,
 } from "../store";
 import { useI18n } from "../composables/useI18n";
 
@@ -93,7 +94,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="bg-grey-darken-4 border-e flex-shrink-0 d-flex flex-column sidebar-transition"
+    class="bg-grey-darken-4 border-e flex-shrink-0 d-flex flex-column psm-sidebar"
     :style="{ width: state.isSidebarOpen ? '250px' : '36px' }"
     data-testid="controls-bar"
   >
@@ -112,9 +113,9 @@ onUnmounted(() => {
 
     <!-- Main Content -->
     <div
-      class="pa-2 d-flex flex-column flex-grow-1 sidebar-content"
+      class="pa-2 d-flex flex-column flex-grow-1 psm-sidebar__content"
       style="min-width: 250px;"
-      :class="{ 'content-hidden': !state.isSidebarOpen }"
+      :class="{ 'psm-sidebar__content--hidden': !state.isSidebarOpen }"
     >
       <div class="flex-grow-0">
         <div class="text-caption text-grey mb-1">{{ t('fileOperations') }}</div>
@@ -193,6 +194,20 @@ onUnmounted(() => {
         ></v-text-field>
         
 
+
+        <div class="text-caption text-grey mb-1">{{ t('duplicateCheckMode') }}</div>
+        <v-radio-group
+          :model-value="state.duplicateCheckMode"
+          density="compact"
+          color="primary"
+          hide-details
+          class="mb-4"
+          @update:model-value="(val) => val && setDuplicateCheckMode(val as 'none' | 'warn' | 'error')"
+        >
+          <v-radio :label="t('checkNone')" value="none"></v-radio>
+          <v-radio :label="t('checkWarn')" value="warn"></v-radio>
+          <v-radio :label="t('checkError')" value="error"></v-radio>
+        </v-radio-group>
 
         <div class="text-caption text-grey mb-1">{{ t('uiScale') }}</div>
         <v-btn-toggle
@@ -277,21 +292,21 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
-.sidebar-transition {
+<style scoped lang="scss">
+.psm-sidebar {
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-}
 
-.sidebar-content {
-  transition: opacity 0.2s;
-  opacity: 1;
-}
+  &__content {
+    transition: opacity 0.2s;
+    opacity: 1;
 
-.content-hidden {
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transition: opacity 0.2s, visibility 0s 0.2s; /* delay visibility hide */
+    &--hidden {
+      opacity: 0;
+      pointer-events: none;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0s 0.2s; /* delay visibility hide */
+    }
+  }
 }
 </style>
