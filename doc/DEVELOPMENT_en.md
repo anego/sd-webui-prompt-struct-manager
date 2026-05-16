@@ -51,3 +51,20 @@ npx playwright test
 ## 5. Debugging
 Filter by `[PSM]` in the browser console to isolate extension logs.
 If detailed logs are needed, set `dev_mode` to `true` in the configuration file (`config.json`) or enable developer mode via the UI (if implemented).
+
+## 6. Styling & CSS Architecture
+
+To ensure high maintainability and scalability, this project adheres to the following styling guidelines:
+
+### 6.1 SCSS & BEM Methodology
+- **SCSS** is used for styling, and class names must strictly follow the **BEM (Block, Element, Modifier)** methodology.
+- This prevents style collisions between components and clarifies the visual structure (e.g., `.psm-node`, `.psm-node__add-zone`, `.psm-node--focused`).
+
+### 6.2 Centralized Variables
+- Hardcoded magic numbers for colors, sizes, and Z-indexes are strictly prohibited.
+- All global constants are defined in `src/styles/_variables.scss` and accessed using `@use` in each component.
+- This allows for global theme or layout adjustments from a single source of truth.
+
+### 6.3 Prohibition of `!important`
+- Using `!important` to override Vuetify's default styles is **strictly prohibited**.
+- Instead, override styles safely by **increasing CSS Specificity**, such as prefixing with parent selectors (e.g., `html body .psm-app-root`) or tag names (e.g., `div.psm-node`).

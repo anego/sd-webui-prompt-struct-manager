@@ -10,7 +10,12 @@ This project has been tested with "Stable Diffusion WebUI reForge".
 *   **Structured Management**: Manage prompts in a hierarchical structure of groups (folders) and items (tags).
 *   **Intuitive Operation**: Reorder and move items via drag-and-drop.
 *   **Toggle Enable/Disable**: Switch items or groups ON/OFF with a single click (or Spacebar).
+*   **Bulk Toggle**: Easily enable or disable all items within a group at once using icons on the group header.
 *   **Weight Adjustment**: Adjust prompt weights using sliders.
+*   **Random Group**: Supports Dynamic Prompts `{A|B|C}` syntax to randomly select a prompt from within the group.
+*   **Duplicate Detection**: Automatically detects duplicate prompts in the tree, highlights them, and can block generation based on settings.
+*   **Group Map**: Displays a tree structure navigation on the right side, allowing instant jumping to target groups with a click.
+*   **Tag Autocomplete Integration**: If `a1111-sd-webui-tagcomplete` is installed, tag suggestions are available during input.
 *   **Apply & Close**: Transfer constructed prompts to WebUI with one click and close the panel.
 *   **Smart Formatting**: Automatically consolidates consecutive commas for cleaner prompts.
 *   **File Management**: Save, load, duplicate, and rename prompt configurations as YAML files.

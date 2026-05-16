@@ -1,5 +1,5 @@
 import { reactive, watch } from "vue";
-import { PsmItem } from "./types";
+import { PsmItem, DuplicateCheckMode } from "./types";
 import { Logger, setDebugMode } from "./log";
 
 /**
@@ -60,6 +60,12 @@ export const state = reactive({
   lang: "ja" as "ja" | "en",
   /** パネル開閉ショートカットキー (例: "Ctrl+B") */
   toggleShortcut: "",
+  /** 重複プロンプトチェックモード */
+  duplicateCheckMode: "none" as DuplicateCheckMode,
+  /** 重複と判定されたプロンプトのテキストコレクション */
+  duplicateTexts: new Set<string>(),
+  /** 現在のハイライトレベル（色分け用） */
+  duplicateHighlightLevel: null as "warn" | "error" | null,
 });
 
 /**
@@ -450,6 +456,7 @@ export const loadSettingsLocal = () => {
       }
       if (data.sidebar_open !== undefined) state.isSidebarOpen = data.sidebar_open;
       if (data.toggle_shortcut) state.toggleShortcut = data.toggle_shortcut;
+      if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
     } catch (e) {
       Logger.error("Failed to load local settings", e);
     }
@@ -463,6 +470,7 @@ export const saveSettingsLocal = () => {
     last_file: state.selectedFile || (state as any).lastFile,
     sidebar_open: state.isSidebarOpen,
     toggle_shortcut: state.toggleShortcut,
+    duplicate_check_mode: state.duplicateCheckMode,
   };
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 };
@@ -688,4 +696,59 @@ export const setLang = async (lang: "ja" | "en") => {
 export const setToggleShortcut = async (shortcut: string) => {
   state.toggleShortcut = shortcut;
   saveSettingsLocal();
+};
+
+/**
+ * 有効なプロンプトの中で重複しているテキストを抽出する
+ * ポジティブ・ネガティブ全体を走査して判定。
+ */
+export const detectDuplicates = (): Set<string> => {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  // 複数回出現しても意味的に重複とは見なさない制御用キーワードを定義
+  const IGNORED_TOKENS = new Set(["BREAK", "AND"]);
+
+  const walk = (nodes: PsmItem[], parentDisabled: boolean) => {
+    for (const node of nodes) {
+      if (!node) continue;
+      const effectiveEnabled = node.enabled && !parentDisabled;
+      
+      if (node.is_group && node.children) {
+        walk(node.children, !effectiveEnabled);
+      } else if (!node.is_group && effectiveEnabled) {
+        const text = (node.content || "").trim();
+        // 制御キーワードは重複チェックの対象外とする
+        if (text && !IGNORED_TOKENS.has(text.toUpperCase())) {
+          if (seen.has(text)) {
+            duplicates.add(text);
+          } else {
+            seen.add(text);
+          }
+        }
+      }
+    }
+  };
+
+  walk(state.positive, false);
+  walk(state.negative, false);
+  return duplicates;
+};
+
+/**
+ * 重複の強調表示をクリアする
+ */
+export const clearDuplicateHighlight = () => {
+  state.duplicateTexts.clear();
+  state.duplicateHighlightLevel = null;
+};
+
+/**
+ * 重複プロンプトチェックモードを設定し、保存する
+ * @param mode "none" | "warn" | "error"
+ */
+export const setDuplicateCheckMode = async (mode: DuplicateCheckMode) => {
+  state.duplicateCheckMode = mode;
+  saveSettingsLocal();
+  clearDuplicateHighlight();
 };

@@ -137,7 +137,7 @@ const modalTitle = computed(() => {
           rows="3"
           max-rows="8"
           data-testid="edit-content-input"
-          class="mb-2 prompt-textarea-lifted"
+          class="mb-2 psm-edit-modal__textarea--lifted"
         ></v-textarea>
 
         <div
@@ -238,22 +238,20 @@ const modalTitle = computed(() => {
   </PsmModal>
 </template>
 
-<style>
-/* Override Tag Autocomplete z-index to ensure it appears above Vuetify modal elements */
-.autocompleteParent {
-  z-index: 2500 !important;
-}
+<style scoped lang="scss">
+@use "../styles/variables" as *;
 
-/* 
-  Lift the textarea container stacking context so its children (autocomplete popup) 
-  appear above subsequent siblings (like the weight bar).
-*/
-.prompt-textarea-lifted {
-  position: relative;
-  z-index: 100;
+.psm-edit-modal {
+  &__textarea--lifted {
+    position: relative;
+    z-index: $z-index-base;
+  }
 }
-/* Ensure the input slot doesn't clip the overflow */
-.prompt-textarea-lifted .v-field__input {
-    overflow: visible !important;
+</style>
+
+<style>
+/* Ensure the input slot doesn't clip the overflow (Vuetify internal override) */
+div.psm-edit-modal__textarea--lifted .v-field__input {
+    overflow: visible;
 }
 </style>

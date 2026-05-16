@@ -36,7 +36,7 @@ const emit = defineEmits<{
  * CSS遷移によりスムーズに開閉します。
  */
 const paneClass = computed(() => {
-  return props.isOpen ? "psm-pane-open" : "psm-pane-collapsed";
+  return props.isOpen ? "psm-pane--open" : "psm-pane--collapsed";
 });
 
 /**
@@ -68,7 +68,7 @@ const openPane = () => emit("update:isOpen", true);
   >
     <template v-if="isOpen">
       <div
-        class="d-flex align-center px-3 py-2 bg-grey-darken-3 border-b border-grey-darken-2 flex-shrink-0 cursor-pointer hover-header"
+        class="psm-pane__header--hoverable d-flex align-center px-3 py-2 bg-grey-darken-3 border-b border-grey-darken-2 flex-shrink-0 cursor-pointer"
         @click="toggleOpen"
       >
         <v-icon :color="color" size="small" class="mr-2">{{ icon }}</v-icon>
@@ -102,7 +102,7 @@ const openPane = () => emit("update:isOpen", true);
       </div>
 
       <div
-        class="flex-grow-1 overflow-y-auto pa-2 bg-grey-darken-4 scroll-container"
+        class="flex-grow-1 overflow-y-auto pa-2 bg-grey-darken-4 psm-scrollbar--dynamic"
         :class="scaleClass"
       >
         <draggable
@@ -145,67 +145,58 @@ const openPane = () => emit("update:isOpen", true);
 
     <div
       v-else
-      class="h-100 d-flex flex-column align-center pt-4 bg-grey-darken-3 cursor-pointer hover-bright"
+      class="psm-pane__placeholder--hoverable h-100 d-flex flex-column align-center pt-4 bg-grey-darken-3 cursor-pointer"
       @click="openPane"
       :title="t('clickToOpen')"
     >
       <v-icon :color="color" class="mb-2">{{ icon }}</v-icon>
-      <div class="text-vertical text-subtitle-2 font-weight-bold text-grey">
+      <div class="psm-pane__text-vertical text-subtitle-2 font-weight-bold text-grey">
         {{ title.toUpperCase() }}
       </div>
     </div>
   </div>
 </template>
 
-<style scoped>
-.psm-pane {
+<style scoped lang="scss">
+@use "../styles/variables" as *;
+
+div.psm-pane {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-}
-.psm-pane-open {
-  flex: 1 1 0;
-  min-width: 0;
-}
-.psm-pane-collapsed {
-  flex: 0 0 40px;
-}
-.hover-header:hover {
-  background-color: #424242 !important;
-}
-.text-vertical {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  letter-spacing: 2px;
-  white-space: nowrap;
-}
-.hover-bright:hover {
-  filter: brightness(1.2);
+
+  &--open {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  &--collapsed {
+    flex: 0 0 40px;
+  }
+
+  div.psm-pane__header--hoverable:hover {
+    background-color: $color-bg-hover;
+  }
+
+  div.psm-pane__placeholder--hoverable:hover {
+    filter: brightness(1.2);
+  }
+
+  div.psm-pane__text-vertical {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    letter-spacing: 2px;
+    white-space: nowrap;
+  }
 }
 
 /* Scale font sizes */
 .scale-small {
-  font-size: 0.85rem;
+  font-size: $font-size-sm;
 }
 .scale-medium {
-  font-size: 1rem;
+  font-size: $font-size-base;
 }
 .scale-large {
-  font-size: 1.2rem;
+  font-size: $font-size-lg;
 }
-
-.scroll-container::-webkit-scrollbar {
-  width: 1.5em; /* dynamically based on font-size */
-}
-.scroll-container::-webkit-scrollbar-track {
-  background: #333;
-}
-.scroll-container::-webkit-scrollbar-thumb {
-  background: #555;
-  border-radius: 99px; /* rounded pill */
-  border: 0.35em solid #333; /* border scales too */
-}
-.scroll-container::-webkit-scrollbar-thumb:hover {
-  background: #777;
-}
-
 </style>

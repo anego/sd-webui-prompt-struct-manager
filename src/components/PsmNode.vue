@@ -210,6 +210,21 @@ const isDynamicPrompt = computed(() => {
   return /^__.+__$/.test(content.trim());
 });
 
+const isDuplicate = computed(() => {
+  if (props.item.is_group) return false;
+  if (!isEffectiveEnabled.value) return false;
+  const text = (props.item.content || "").trim();
+  return !!text && state.duplicateTexts.has(text);
+});
+
+const chipColor = computed(() => {
+  if (!isEffectiveEnabled.value) return 'grey';
+  if (isDuplicate.value && state.duplicateHighlightLevel) {
+    return state.duplicateHighlightLevel === "warn" ? "warning" : "error";
+  }
+  return isDynamicPrompt.value ? 'cyan-accent-2' : 'primary';
+});
+
 const moveSelf = (dir: 'up' | 'down') => {
   const idx = props.parentChildren.findIndex(n => n.id === props.item.id);
   if (idx === -1) return;
@@ -236,18 +251,18 @@ const moveSelf = (dir: 'up' | 'down') => {
   <div
     v-if="isVisible"
     :id="'node-' + item.id"
-    class="psm-node-wrapper mb-1"
+    class="psm-node mb-1"
     :class="item.is_group ? 'w-100' : ''"
   >
     <div
       v-if="item.is_group"
-      class="group-container rounded border pa-1"
+      class="psm-node__group rounded border pa-1"
       :class="[
         isEffectiveEnabled ? 'bg-grey-darken-4' : 'bg-grey-darken-4 opacity-50',
-        item.isRandom ? 'random-mode-group' : ''
+        item.isRandom ? 'psm-node__group--random' : ''
       ]"
     >
-      <div class="top-add-zone d-flex justify-start ga-2 mb-1">
+      <div class="psm-node__add-zone d-flex justify-start ga-2 mb-1">
         <v-btn
           size="x-small"
           variant="flat"
@@ -267,8 +282,8 @@ const moveSelf = (dir: 'up' | 'down') => {
       </div>
 
       <div
-        class="d-flex align-center justify-start cursor-pointer py-1 node-header"
-        :class="{ 'focused': state.focusedItemId === item.id }"
+        class="psm-node__header d-flex align-center justify-start cursor-pointer py-1"
+        :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
         @click.stop="handleClickHeader"
         @dblclick.stop="startEdit(item)"
         @contextmenu.prevent.stop="
@@ -279,13 +294,13 @@ const moveSelf = (dir: 'up' | 'down') => {
           <v-icon
             size="24"
             :color="parentChildren.indexOf(item) === 0 ? 'grey-darken-3' : 'grey-lighten-1'"
-            class="cursor-pointer hover-scale"
+            class="psm-cursor-pointer psm-node__hover-scale"
             @click.stop="moveSelf('up')"
           >mdi-menu-up</v-icon>
           <v-icon
             size="24"
             :color="parentChildren.indexOf(item) === parentChildren.length - 1 ? 'grey-darken-3' : 'grey-lighten-1'"
-            class="cursor-pointer hover-scale"
+            class="psm-cursor-pointer psm-node__hover-scale"
             @click.stop="moveSelf('down')"
           >mdi-menu-down</v-icon>
         </div>
@@ -335,7 +350,7 @@ const moveSelf = (dir: 'up' | 'down') => {
         ></v-switch>
 
         <!-- Bulk Toggle Buttons (Show on Hover) -->
-        <div class="action-buttons d-flex align-center ga-1 ml-4">
+        <div class="psm-node__action-buttons d-flex align-center ga-1 ml-4">
           <v-btn
             icon
             size="x-small"
@@ -372,7 +387,7 @@ const moveSelf = (dir: 'up' | 'down') => {
       <!-- Explicit Drop Zone for Closed Groups -->
       <div 
         v-if="state.isDragging && !item.isOpen"
-        class="drop-into-zone d-flex align-center justify-center text-caption text-grey"
+        class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey"
         @dragenter.stop="handleGroupMouseOver"
         @dragover.prevent
         @drop.stop="handleDropIntoGroup"
@@ -408,7 +423,7 @@ const moveSelf = (dir: 'up' | 'down') => {
         <!-- Explicit Drop Zone for Open Groups -->
         <div 
           v-if="state.isDragging"
-          class="drop-into-zone d-flex align-center justify-center text-caption text-grey mb-1"
+          class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey mb-1"
           @dragover.prevent
           @drop.stop="handleDropIntoGroup"
         >
@@ -439,19 +454,19 @@ const moveSelf = (dir: 'up' | 'down') => {
 
     <v-chip
       v-else
-      :color="isEffectiveEnabled ? (isDynamicPrompt ? 'cyan-accent-2' : 'primary') : 'grey'"
-      :variant="isEffectiveEnabled ? 'tonal' : 'outlined'"
+      :color="chipColor"
+      :variant="isEffectiveEnabled && !isDuplicate ? 'tonal' : 'elevated'"
       :label="!isDynamicPrompt"
       size="small"
       class="ma-0"
-      :class="{ 'focused': state.focusedItemId === item.id }"
+      :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
       @click.stop="handleClickLeaf"
       @dblclick.stop="startEdit(item)"
       @contextmenu.prevent.stop="
         openContextMenu?.($event, item, parentChildren)
       "
     >
-      <v-icon start :size="iconSize" class="cursor-grab drag-handle"
+      <v-icon start :size="iconSize" class="psm-cursor-grab psm-node__drag-handle"
         >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
       >
       <span
@@ -478,7 +493,7 @@ const moveSelf = (dir: 'up' | 'down') => {
       <v-icon
         end
         :size="iconSize"
-        class="ml-2 opacity-50 hover-opacity-100"
+        class="ml-2 opacity-50 psm-node__hover-opacity"
         @click.stop="startEdit(item)"
         data-testid="edit-item-btn"
       >
@@ -488,92 +503,93 @@ const moveSelf = (dir: 'up' | 'down') => {
   </div>
 </template>
 
-<style scoped>
-.focused {
-  outline: 2px solid #2196f3;
-  outline-offset: -2px;
-  background-color: rgba(33, 150, 243, 0.1);
-}
-.hover-opacity-100:hover {
-  opacity: 1 !important;
-}
-.cursor-grab {
-  cursor: grab;
-}
+<style scoped lang="scss">
+@use "../styles/variables" as *;
 
-.top-add-zone {
-  /* 常時表示へ変更: 元々は height:0; opacity:0; だった */
-  height: 28px;
-  overflow: hidden;
-  opacity: 1;
-  margin-bottom: 4px;
-}
-/*.group-container:hover .top-add-zone {
-   hoverでの制御を無効化 (常時表示のため)
-}*/
+div.psm-node {
+  &--focused {
+    outline: 2px solid $color-warning;
+    outline-offset: -2px;
+    background-color: $color-warning-light;
+  }
 
-.group-container .action-buttons {
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.group-container:hover .action-buttons {
-  opacity: 1;
+  i.psm-node__hover-opacity {
+    transition: opacity 0.2s;
+    &:hover {
+      opacity: 1;
+    }
+  }
+
+  i.psm-node__hover-scale {
+    transition: transform 0.2s;
+    &:hover {
+      transform: scale(1.1);
+    }
+  }
+
+  &__add-zone {
+    height: $size-add-zone;
+    overflow: hidden;
+    opacity: 1;
+    margin-bottom: $spacing-xs;
+  }
+
+  div.psm-node__group {
+    .psm-node__action-buttons {
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    &:hover .psm-node__action-buttons {
+      opacity: 1;
+    }
+
+    &--random {
+      border: 1px dashed $color-accent;
+      background-color: $color-accent-light;
+    }
+  }
+
+  &__drop-zone {
+    height: $size-drop-zone;
+    background-color: $color-primary-light-1;
+    border: 1px dashed $color-primary;
+    border-radius: $radius-sm;
+    margin-top: 2px;
+    transition: all 0.2s;
+    &:hover {
+      background-color: $color-primary-light-3;
+    }
+  }
+
+  /* Scale Classes */
+  .v-chip.text-scale-small, .text-scale-small {
+    font-size: $font-size-sm;
+    line-height: 1.2;
+  }
+  .v-chip.text-scale-medium, .text-scale-medium {
+    font-size: $font-size-base;
+    line-height: 1.3;
+  }
+  .v-chip.text-scale-large, .text-scale-large {
+    font-size: $font-size-lg;
+    line-height: 1.4;
+    font-weight: 500;
+  }
+
+  /* Switch Label Style */
+  :deep(.v-switch .v-label) {
+    font-size: $font-size-xs;
+    opacity: 1;
+    color: $color-text-grey;
+    white-space: nowrap;
+  }
+  :deep(.v-switch.v-input--is-label-active .v-label) {
+    color: $color-accent;
+    font-weight: bold;
+  }
 }
 
 :deep(.v-selection-control__input i) {
-  font-size: 18px;
-}
-
-.drop-into-zone {
-  height: 24px;
-  background-color: rgba(33, 150, 243, 0.2);
-  border: 1px dashed #2196f3;
-  border-radius: 4px;
-  margin-top: 2px;
-  transition: all 0.2s;
-}
-.drop-into-zone:hover {
-  background-color: rgba(33, 150, 243, 0.4);
-}
-
-
-/* Update focused color to Orange to distinguish from Enabled (Blue) */
-.focused {
-  outline: 2px solid #FF9800 !important; /* Orange */
-  outline-offset: -2px;
-  background-color: rgba(255, 152, 0, 0.15) !important;
-}
-
-.random-mode-group {
-  border: 1px dashed #E040FB !important; /* Purple Accent */
-  background-color: rgba(224, 64, 251, 0.1) !important;
-}
-
-/* Scale Classes */
-.text-scale-small {
-  font-size: 0.85rem !important; /* ~13.6px -> Target 14pxish */
-  line-height: 1.2;
-}
-.text-scale-medium {
-  font-size: 1rem !important; /* ~16px */
-  line-height: 1.3;
-}
-.text-scale-large {
-  font-size: 1.2rem !important; /* ~19.2px */
-  line-height: 1.4;
-  font-weight: 500;
-}
-
-
-/* Switch Label Style */
-:deep(.v-switch .v-label) {
-  font-size: 0.75rem !important;
-  opacity: 1 !important;
-  color: #BDBDBD; /* Grey lighten-1 approx */
-  white-space: nowrap;
-}
-:deep(.v-switch.v-input--is-label-active .v-label) {
-  color: #E040FB !important; /* Purple Accent 2 */
-  font-weight: bold;
+  font-size: $font-size-icon;
 }
 </style>

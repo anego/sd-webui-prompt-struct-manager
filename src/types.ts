@@ -21,6 +21,10 @@ export interface PsmItem {
   isOpen?: boolean; // UI状態制御用
   /** 子要素のリスト (グループの場合のみ存在) */
   children?: PsmItem[];
-  /** ランダムモード (Dynamic Prompts {A|B} 形式で出力) */
   isRandom?: boolean;
 }
+
+/**
+ * 重複プロンプトのチェック設定モード
+ */
+export type DuplicateCheckMode = "none" | "warn" | "error";

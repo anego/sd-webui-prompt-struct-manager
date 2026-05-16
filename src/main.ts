@@ -8,6 +8,7 @@ import "vuetify/styles";
 import { createVuetify } from "vuetify";
 import { aliases, mdi } from "vuetify/iconsets/mdi";
 import "./mdi-embedded.css"; // Base64 Embedded Font
+import "./styles/main.scss"; // Common PSM styles
 
 const vuetify = createVuetify({
   icons: {

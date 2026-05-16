@@ -24,6 +24,11 @@
 - **Enable All:** Click `[☑☑]` to enable all items within the group.
 - **Disable All:** Click `[☒]` to disable all items within the group.
 
+### 1.5 Duplicate Detection
+- **Auto Detection:** Automatically detects and highlights duplicate prompts that have the exact same text within the tree.
+- **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
+- **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks.
+
 ## 2. User Interface (UI/UX)
 
 ### 2.1 Group Map

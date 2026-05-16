@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anego's Projects</title>
+    <meta name="description" content="Development portfolio and project portal.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Google Analytics (GA4) -->
+    <!-- Replace G-XXXXXXXXXX with your Measurement ID -->
+    <!--
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-XXXXXXXXXX');
+    </script>
+    -->
+    <style>
+        :root {
+            --bg-color: #121212;
+            --surface-color: #1e1e1e;
+            --primary-color: #bb86fc;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            padding: 4rem 0;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .project-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .project-card {
+            background-color: var(--surface-color);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .project-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            border-color: var(--primary-color);
+        }
+
+        .project-img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            background-color: #333;
+            /* Fallback or placeholder if image is missing */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            font-size: 2rem;
+        }
+
+        .project-content {
+            padding: 1.5rem;
+        }
+
+        .project-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: var(--primary-color);
+        }
+
+        .project-desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 4rem 0;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="container">
+            <h1>Anego's Projects</h1>
+            <p class="subtitle">Development Portfolio & Extensions</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="project-list">
+            <!-- Project Card -->
+            <a href="./sd-webui-prompt-struct-manager/index.html" class="project-card">
+                <!-- Using the asset from the sub-project directly (might need absolute path or copy to root assets if wanted, but sub-path works) -->
+                <div class="project-img"
+                    style="background-image: url('./sd-webui-prompt-struct-manager/assets/PSM_basic_operations.gif'); background-size: cover; background-position: center;">
+                </div>
+                <div class="project-content">
+                    <div class="project-title">SD WebUI Prompt Struct Manager</div>
+                    <div class="project-desc">
+                        Stable Diffusion WebUI 向けの構造化プロンプト管理拡張機能。階層構造、D&D操作、重み調整などを直感的に行えます。
+                    </div>
+                </div>
+            </a>
+
+            <!-- Future Project Placeholder -->
+            <!--
+            <a href="#" class="project-card" style="opacity: 0.5; pointer-events: none;">
+                <div class="project-img">🚧</div>
+                <div class="project-content">
+                    <div class="project-title">Coming Soon</div>
+                    <div class="project-desc">More projects under development...</div>
+                </div>
+            </a>
+            -->
+        </div>
+    </div>
+
+    <footer>
+        &copy; 2024 anego.
+    </footer>
+</body>
+
+</html>
