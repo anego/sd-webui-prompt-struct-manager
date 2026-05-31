@@ -39,6 +39,8 @@ export const ja = {
   checkNone: "チェックしない",
   checkWarn: "警告を表示する",
   checkError: "エラーで反映を停止する",
+  showWeightSlider: "ウェイト調整スライダーを表示",
+
 
   // PsmTreePane.vue
   addPrompt: "プロンプト追加",
@@ -48,6 +50,8 @@ export const ja = {
   randomModeOn: "ランダムモード: ON (生成時に1つ選択)",
   randomModeOff: "ランダムモード: OFF (全て連結)",
   randomReflection: "グループ内ランダム反映",
+  exclusiveReflection: "グループ内排他選択 (択一)",
+
   enableAll: "グループ内すべて有効化",
   disableAll: "グループ内すべて無効化",
   openAndDrop: "開く / ドロップ",

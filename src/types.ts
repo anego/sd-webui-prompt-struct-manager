@@ -22,7 +22,9 @@ export interface PsmItem {
   /** 子要素のリスト (グループの場合のみ存在) */
   children?: PsmItem[];
   isRandom?: boolean;
+  isExclusive?: boolean;
 }
+
 
 /**
  * 重複プロンプトのチェック設定モード

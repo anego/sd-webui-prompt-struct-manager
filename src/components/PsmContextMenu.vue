@@ -101,10 +101,10 @@ const menuStyle = computed(() => {
 });
 
 const submenuOpen = ref(false);
-const moveToActivator = ref<any>(null); // Ref for focus management
+const moveToActivator = ref<{ $el?: HTMLElement; focus?: () => void } | null>(null); // Ref for focus management
 
 const activatorId = "psm-dummy-activator"; // Unique ID for positioning
-let hoverTimeout: any = null;
+let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const onMouseEnter = () => {
   if (hoverTimeout) clearTimeout(hoverTimeout);

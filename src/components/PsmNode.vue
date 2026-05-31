@@ -13,6 +13,9 @@ import {
   toggleGroupEnabled,
   teleportItem,
   setGroupChildrenEnabled,
+  toggleItemEnabled,
+  toggleGroupExclusive,
+  resetWeight,
 } from "../store";
 import { PsmItem } from "../types";
 import { useI18n } from "../composables/useI18n";
@@ -25,6 +28,7 @@ const props = defineProps<{
   depth?: number;
   parentChildren: PsmItem[];
   isParentDisabled?: boolean;
+  parentGroup?: PsmItem;
 }>();
 const openContextMenu = inject<Function>("psm-context-menu");
 
@@ -101,14 +105,20 @@ const childIsParentDisabled = computed(() => {
 
 const handleToggle = () => {
   if (props.isParentDisabled) return;
-  props.item.enabled = !props.item.enabled;
-  savePrompts();
+  toggleItemEnabled(props.item, props.parentChildren, props.parentGroup);
 };
 
 const handleGroupToggle = () => {
   if (props.isParentDisabled) return;
   toggleGroupEnabled(props.item);
 };
+
+const handleGroupExclusiveToggle = (val: unknown) => {
+  if (props.isParentDisabled) return;
+  toggleGroupExclusive(props.item, typeof val === "boolean" ? val : undefined);
+};
+
+
 
 const addBefore = (is_group: boolean) => {
   const idx = props.parentChildren.indexOf(props.item);
@@ -349,6 +359,21 @@ const moveSelf = (dir: 'up' | 'down') => {
           style="min-width: 150px"
         ></v-switch>
 
+        <!-- Inline Exclusive Switch -->
+        <v-switch
+          v-model="item.isExclusive"
+          color="teal-accent-4"
+          density="compact"
+          hide-details
+          inset
+          :label="t('exclusiveReflection')"
+          @update:modelValue="handleGroupExclusiveToggle"
+          @click.stop
+          class="ml-4"
+          style="min-width: 150px"
+        ></v-switch>
+
+
         <!-- Bulk Toggle Buttons (Show on Hover) -->
         <div class="psm-node__action-buttons d-flex align-center ga-1 ml-4">
           <v-btn
@@ -408,7 +433,7 @@ const moveSelf = (dir: 'up' | 'down') => {
           handle=".drag-handle"
           :animation="200"
           class="d-flex flex-wrap align-center ga-1"
-          @start="(e: any) => { state.isDragging = true; state.draggedItem = item.children![e.oldIndex!]; }"
+          @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = item.children![e.oldIndex!]; }"
           @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
         >
           <template #item="{ element }">
@@ -416,7 +441,9 @@ const moveSelf = (dir: 'up' | 'down') => {
               :item="element"
               :parentChildren="item.children!"
               :is-parent-disabled="childIsParentDisabled"
+              :parent-group="item"
             />
+
           </template>
         </draggable>
         
@@ -452,67 +479,103 @@ const moveSelf = (dir: 'up' | 'down') => {
       </div>
     </div>
 
-    <v-chip
-      v-else
-      :color="chipColor"
-      :variant="isEffectiveEnabled && !isDuplicate ? 'tonal' : 'elevated'"
-      :label="!isDynamicPrompt"
-      size="small"
-      class="ma-0"
-      :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
-      @click.stop="handleClickLeaf"
-      @dblclick.stop="startEdit(item)"
-      @contextmenu.prevent.stop="
-        openContextMenu?.($event, item, parentChildren)
-      "
-    >
-      <v-icon start :size="iconSize" class="psm-cursor-grab psm-node__drag-handle"
-        >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
+    <div v-else class="d-inline-flex flex-column align-center ga-0 psm-node__leaf-container">
+      <v-chip
+        :color="chipColor"
+        :variant="isEffectiveEnabled && !isDuplicate ? 'tonal' : 'elevated'"
+        :label="!isDynamicPrompt"
+        size="small"
+        class="ma-0"
+        :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
+        @click.stop="handleClickLeaf"
+        @dblclick.stop="startEdit(item)"
+        @contextmenu.prevent.stop="
+          openContextMenu?.($event, item, parentChildren)
+        "
       >
-      <span
-        class="text-truncate"
-        style="max-width: 150px"
-        :class="[
-          { 
-            'text-decoration-line-through text-disabled': !isEffectiveEnabled,
-            'font-italic': isDynamicPrompt && isEffectiveEnabled
-          },
-          scaleTextClass
-        ]"
-        data-testid="leaf-label"
-      >
-        {{ item.name || item.memo || item.content }}
-      </span>
-      <!-- Dynamic Prompt Indicator (Icon already in start slot) -->
-      <span
-        v-if="item.weight !== 1.0"
-        class="ml-1 text-caption text-orange font-weight-bold"
-        >({{ item.weight }})</span
-      >
+        <v-icon start :size="iconSize" class="psm-cursor-grab psm-node__drag-handle"
+          >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
+        >
+        <span
+          class="text-truncate"
+          style="max-width: 150px"
+          :class="[
+            { 
+              'text-decoration-line-through text-disabled': !isEffectiveEnabled,
+              'font-italic': isDynamicPrompt && isEffectiveEnabled
+            },
+            scaleTextClass
+          ]"
+          data-testid="leaf-label"
+        >
+          {{ item.name || item.memo || item.content }}
+        </span>
+        <!-- Dynamic Prompt Indicator -->
+        <span
+          v-if="item.weight !== 1.0"
+          class="ml-1 text-caption text-orange font-weight-bold"
+          >({{ item.weight }})</span
+        >
 
-      <v-icon
-        end
-        :size="iconSize"
-        class="ml-2 opacity-50 psm-node__hover-opacity"
-        @click.stop="startEdit(item)"
-        data-testid="edit-item-btn"
+        <v-icon
+          end
+          :size="iconSize"
+          class="ml-2 opacity-50 psm-node__hover-opacity"
+          @click.stop="startEdit(item)"
+          data-testid="edit-item-btn"
+        >
+          mdi-cog
+        </v-icon>
+      </v-chip>
+
+      <!-- Inline weight slider (Under the chip) -->
+      <div 
+        v-if="state.showWeightSlider && isEffectiveEnabled" 
+        class="d-flex align-center w-100 mt-1 px-1 psm-node__weight-container"
       >
-        mdi-cog
-      </v-icon>
-    </v-chip>
+        <v-slider
+          v-model="item.weight"
+          min="0.1"
+          max="2.0"
+          step="0.05"
+          density="compact"
+          hide-details
+          color="orange"
+          track-color="grey"
+          class="psm-node__weight-slider flex-grow-1"
+          @update:modelValue="savePrompts"
+          @click.stop
+        ></v-slider>
+        
+        <!-- Reset Button -->
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          color="grey"
+          class="ml-1 flex-shrink-0 psm-node__weight-reset"
+          style="width: 16px; height: 16px; min-width: 16px; font-size: 8px;"
+          @click.stop="resetWeight(item)"
+          title="Reset to 1.0"
+        >
+          <v-icon size="10">mdi-refresh</v-icon>
+        </v-btn>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <style scoped lang="scss">
 @use "../styles/variables" as *;
 
-div.psm-node {
-  &--focused {
-    outline: 2px solid $color-warning;
-    outline-offset: -2px;
-    background-color: $color-warning-light;
-  }
+.psm-node--focused {
+  outline: 2px solid $color-warning !important;
+  outline-offset: -2px !important;
+  background-color: $color-warning-light !important;
+}
 
+div.psm-node {
   i.psm-node__hover-opacity {
     transition: opacity 0.2s;
     &:hover {
@@ -544,8 +607,8 @@ div.psm-node {
     }
 
     &--random {
-      border: 1px dashed $color-accent;
-      background-color: $color-accent-light;
+      border: 1px dashed $color-accent !important;
+      background-color: $color-accent-light !important;
     }
   }
 
@@ -587,7 +650,47 @@ div.psm-node {
     color: $color-accent;
     font-weight: bold;
   }
+
+  &__leaf-container {
+    vertical-align: top;
+    max-width: 180px; /* 横並びが崩れないための制限 */
+  }
+
+  &__weight-container {
+    height: 18px;
+  }
+
+  &__weight-reset {
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    &:hover {
+      opacity: 1 !important;
+      color: orange !important;
+    }
+  }
+
+  &__weight-slider {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    
+    :deep(.v-input__control) {
+      min-height: unset !important;
+      height: 16px !important;
+    }
+    
+    :deep(.v-slider-thumb) {
+      width: 10px !important;
+      height: 10px !important;
+    }
+    
+    :deep(.v-slider-track) {
+      height: 2px !important;
+    }
+  }
 }
+
 
 :deep(.v-selection-control__input i) {
   font-size: $font-size-icon;

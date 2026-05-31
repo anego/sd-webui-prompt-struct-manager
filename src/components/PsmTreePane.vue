@@ -112,7 +112,7 @@ const openPane = () => emit("update:isOpen", true);
           handle=".drag-handle"
           :animation="200"
           class="d-flex flex-wrap align-center ga-1"
-          @start="(e: any) => { state.isDragging = true; state.draggedItem = writableItems[e.oldIndex!]; }"
+          @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = writableItems[e.oldIndex!]; }"
           @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
         >
           <template #item="{ element }">

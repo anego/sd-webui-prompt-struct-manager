@@ -10,8 +10,8 @@ import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
 
-const nameInputRef = ref<any>(null);
-const contentInputRef = ref<any>(null);
+const nameInputRef = ref<{ focus: () => void } | null>(null);
+const contentInputRef = ref<{ focus: () => void; $el: HTMLElement } | null>(null);
 
 /**
  * 編集モードが有効になった際、適切な入力フィールドにフォーカスを当てる
@@ -35,8 +35,8 @@ watch(
             setTimeout(() => {
               try {
                 const textAreaEl = contentInputRef.value?.$el.querySelector('textarea');
-                if (textAreaEl && (window as any).addAutocompleteToArea) {
-                  (window as any).addAutocompleteToArea(textAreaEl);
+                if (textAreaEl && window.addAutocompleteToArea) {
+                  window.addAutocompleteToArea(textAreaEl);
                   // Debug logging
                   // console.debug("[PSM] Attempted to attach Tag Autocomplete.");
                 }

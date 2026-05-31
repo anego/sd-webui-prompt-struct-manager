@@ -39,7 +39,7 @@ const buildTimestamp = __BUILD_TIMESTAMP__;
 // ダイアログの表示状態管理
 const dialogs = ref({ new: false, copy: false, rename: false, import: false, generate: false });
 const duplicateDialog = ref({ show: false, mode: "warn" as "warn" | "error" });
-const menuState = ref({ visible: false, x: 0, y: 0, items: [] as any[] });
+const menuState = ref({ visible: false, x: 0, y: 0, items: [] as unknown[] });
 
 // 右クリックメニューの状態
 const contextMenu = ref({

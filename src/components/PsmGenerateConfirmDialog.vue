@@ -17,7 +17,7 @@ const emit = defineEmits<{
   (e: "confirm"): void;
 }>();
 
-const confirmBtnRef = ref<HTMLElement | null>(null);
+const confirmBtnRef = ref<{ $el?: HTMLElement } | null>(null);
 
 /**
  * ダイアログ表示時に実行ボタンにフォーカスを当てる
@@ -28,7 +28,7 @@ watch(
   async (val) => {
     if (val) {
       await nextTick();
-      const el = (confirmBtnRef.value as any)?.$el || confirmBtnRef.value;
+      const el = confirmBtnRef.value?.$el || confirmBtnRef.value;
       if (el instanceof HTMLElement) {
         el.focus();
       }

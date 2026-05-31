@@ -38,6 +38,8 @@ export const en = {
   checkNone: "No Check",
   checkWarn: "Show Warning",
   checkError: "Stop with Error",
+  showWeightSlider: "Show Weight Slider",
+
 
   // PsmTreePane.vue
   addPrompt: "Add Prompt",
@@ -47,6 +49,8 @@ export const en = {
   randomModeOn: "Random Mode: ON (Select one)",
   randomModeOff: "Random Mode: OFF (Concat all)",
   randomReflection: "Randomize Group",
+  exclusiveReflection: "Exclusive Selection (Single)",
+
   enableAll: "Enable All in Group",
   disableAll: "Disable All in Group",
   openAndDrop: "Open / Drop",

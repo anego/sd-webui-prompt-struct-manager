@@ -17,6 +17,7 @@ import {
   listFiles,
   clearDuplicateHighlight,
   setDuplicateCheckMode,
+  saveSettingsLocal,
 } from "../store";
 import { useI18n } from "../composables/useI18n";
 
@@ -208,6 +209,16 @@ onUnmounted(() => {
           <v-radio :label="t('checkWarn')" value="warn"></v-radio>
           <v-radio :label="t('checkError')" value="error"></v-radio>
         </v-radio-group>
+
+        <v-switch
+          v-model="state.showWeightSlider"
+          color="primary"
+          density="compact"
+          hide-details
+          :label="t('showWeightSlider')"
+          @update:modelValue="saveSettingsLocal"
+          class="mb-4"
+        ></v-switch>
 
         <div class="text-caption text-grey mb-1">{{ t('uiScale') }}</div>
         <v-btn-toggle

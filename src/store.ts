@@ -66,6 +66,10 @@ export const state = reactive({
   duplicateTexts: new Set<string>(),
   /** 現在のハイライトレベル（色分け用） */
   duplicateHighlightLevel: null as "warn" | "error" | null,
+  /** 最後に選択されていたファイル名 */
+  lastFile: "",
+  /** 重みスライダーを表示するかどうか */
+  showWeightSlider: true,
 });
 
 /**
@@ -282,6 +286,59 @@ export const toggleGroupEnabled = async (group: PsmItem) => {
 };
 
 /**
+ * アイテムの有効/無効状態をトグルする
+ * 親グループが排他選択（isExclusive）の場合は、他の兄弟要素をすべて無効化する
+ */
+export const toggleItemEnabled = async (item: PsmItem, parentChildren: PsmItem[], parentGroup?: PsmItem) => {
+  item.enabled = !item.enabled;
+  
+  if (item.enabled && parentGroup?.isExclusive) {
+    // 他のすべての兄弟要素を無効化
+    for (const sibling of parentChildren) {
+      if (sibling.id !== item.id) {
+        sibling.enabled = false;
+      }
+    }
+  }
+  await savePrompts();
+};
+
+/**
+ * グループの排他選択（isExclusive）のトグルを処理する
+ * ONにされた場合、すでに複数有効なものがあれば最初の1つだけを残して無効化する
+ */
+export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) => {
+  if (forceVal !== undefined) {
+    group.isExclusive = forceVal;
+  } else {
+    group.isExclusive = !group.isExclusive;
+  }
+  
+  if (group.isExclusive && group.children) {
+    let hasEnabled = false;
+    for (const child of group.children) {
+      if (child.enabled) {
+        if (hasEnabled) {
+          child.enabled = false;
+        } else {
+          hasEnabled = true;
+        }
+      }
+    }
+  }
+  await savePrompts();
+};
+
+/**
+ * プロンプトアイテムの重み（weight）を 1.0 にリセットする
+ */
+export const resetWeight = async (item: PsmItem) => {
+  item.weight = 1.0;
+  await savePrompts();
+};
+
+
+/**
  * グループ内の子要素すべての enabled 状態を一括変更する
  * @param group 対象グループ
  * @param enabled true: 有効化, false: 無効化
@@ -315,8 +372,8 @@ export const listFiles = async () => {
     
     // last_fileがあればそれを選択
     if (!state.selectedFile) {
-       if ((state as any).lastFile && state.yamlFiles.includes((state as any).lastFile)) {
-         state.selectedFile = (state as any).lastFile;
+       if (state.lastFile && state.yamlFiles.includes(state.lastFile)) {
+         state.selectedFile = state.lastFile;
          await loadPrompts();
        }
        // Fallback removed to allow unselected state on directory change
@@ -341,8 +398,8 @@ export const loadPrompts = async () => {
     state.negative = (data.negative || []).filter((i: PsmItem) => i != null);
     
     // last_fileを保存
-    if (state.selectedFile !== (state as any).lastFile) {
-      (state as any).lastFile = state.selectedFile;
+    if (state.selectedFile !== state.lastFile) {
+      state.lastFile = state.selectedFile;
       saveSettingsLocal();
     }
     Logger.debug("Prompts loaded successfully.");
@@ -450,13 +507,14 @@ export const loadSettingsLocal = () => {
       if (data.ui_scale) state.uiScale = data.ui_scale;
       if (data.lang) state.lang = data.lang;
       if (data.last_file) {
-        (state as any).lastFile = data.last_file;
+        state.lastFile = data.last_file;
         // ファイルリスト取得前なのでセットだけしておく
         // listFiles内で反映される
       }
       if (data.sidebar_open !== undefined) state.isSidebarOpen = data.sidebar_open;
       if (data.toggle_shortcut) state.toggleShortcut = data.toggle_shortcut;
       if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
+      if (data.show_weight_slider !== undefined) state.showWeightSlider = data.show_weight_slider;
     } catch (e) {
       Logger.error("Failed to load local settings", e);
     }
@@ -467,10 +525,11 @@ export const saveSettingsLocal = () => {
   const data = {
     ui_scale: state.uiScale,
     lang: state.lang,
-    last_file: state.selectedFile || (state as any).lastFile,
+    last_file: state.selectedFile || state.lastFile,
     sidebar_open: state.isSidebarOpen,
     toggle_shortcut: state.toggleShortcut,
     duplicate_check_mode: state.duplicateCheckMode,
+    show_weight_slider: state.showWeightSlider,
   };
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 };
@@ -510,7 +569,7 @@ export const saveConfig = async (dir: string) => {
     state.positive = [];
     state.negative = [];
     state.yamlFiles = [];
-    (state as any).lastFile = ""; // Clear last file memory
+    state.lastFile = ""; // Clear last file memory
     saveSettingsLocal(); // Persist
 
     await fetch("/psm/set-config", {

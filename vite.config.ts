@@ -8,11 +8,10 @@ import vuetify from "vite-plugin-vuetify";
 
 export default defineConfig({
   plugins: [vue(), vuetify({ autoImport: true }), cssInjectedByJsPlugin()],
-  // ★重要：ブラウザでの process is not defined エラーを防止
   define: {
-    "process.env": {
-      NODE_ENV: JSON.stringify("production"),
-    },
+    "process.env.NODE_ENV": JSON.stringify("production"),
+    "process.env": JSON.stringify({ NODE_ENV: "production" }),
+    "process": JSON.stringify({ env: { NODE_ENV: "production" } }),
     __BUILD_TIMESTAMP__: JSON.stringify(new Date().toLocaleString()),
   },
   build: {

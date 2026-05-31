@@ -1,3 +1,8 @@
+// process is not defined エラーの完全防止ポリフィル (Vite 8対策)
+if (typeof (window as any).process === "undefined") {
+  (window as any).process = { env: { NODE_ENV: "production" } };
+}
+
 import { createApp } from "vue";
 import App from "./App.vue";
 import { state, listFiles, loadPrompts, loadConfig } from "./store";
@@ -98,4 +103,5 @@ const mountPsmApp = async () => {
   );
 };
 
-(window as any).onUiLoaded(mountPsmApp);
+window.onUiLoaded?.(mountPsmApp);
+
