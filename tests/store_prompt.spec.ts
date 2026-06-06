@@ -236,6 +236,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
         file: "my_prompts.yaml",
         positive: state.positive,
         negative: state.negative,
+        profiles: state.profiles,
       }),
     });
   });
@@ -440,5 +441,105 @@ describe("カテゴリ内排他選択 (isExclusive)", () => {
     expect(state.showWeightSlider).toBe(false);
   });
 });
+
+// -------------------------------------------------------------------------
+// 5. 状態スナップショット「プロファイル」機能のテスト
+// -------------------------------------------------------------------------
+import { 
+  saveProfile, 
+  applyProfile, 
+  deleteProfile 
+} from "../src/store";
+
+describe("状態スナップショット「プロファイル」機能", () => {
+  beforeEach(() => {
+    state.profiles = [];
+    state.selectedProfileName = "";
+  });
+
+  it("5.1 saveProfile: 現在のツリー状態（enabled/weight）を新規プロファイルとして保存できること", async () => {
+    // Arrange
+    state.selectedFile = "test_profile.yaml";
+    state.positive = [
+      { id: 101, name: "p1", content: "1girl", enabled: true, weight: 1.2, is_group: false },
+    ];
+    state.negative = [
+      { id: 201, name: "n1", content: "lowres", enabled: false, weight: 1.0, is_group: false },
+    ];
+    
+    const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await saveProfile("MyProfile");
+
+    // Assert
+    expect(state.profiles.length).toBe(1);
+    expect(state.profiles[0].name).toBe("MyProfile");
+    expect(state.profiles[0].states).toEqual([
+      { id: 101, enabled: true, weight: 1.2 },
+      { id: 201, enabled: false, weight: 1.0 },
+    ]);
+    expect(state.selectedProfileName).toBe("MyProfile");
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+
+  it("5.2 applyProfile: 保存されたプロファイルを適用した時、ツリー内の全アイテムの状態が一括上書きされること", async () => {
+    // Arrange
+    state.selectedFile = "test_profile.yaml";
+    state.positive = [
+      { id: 101, name: "p1", content: "1girl", enabled: false, weight: 1.0, is_group: false },
+    ];
+    state.negative = [
+      { id: 201, name: "n1", content: "lowres", enabled: true, weight: 1.0, is_group: false },
+    ];
+    state.profiles = [
+      {
+        name: "PresetA",
+        states: [
+          { id: 101, enabled: true, weight: 1.5 },
+          { id: 201, enabled: false, weight: 0.8 },
+        ]
+      }
+    ];
+    
+    const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await applyProfile("PresetA");
+
+    // Assert
+    expect(state.positive[0].enabled).toBe(true);
+    expect(state.positive[0].weight).toBe(1.5);
+    expect(state.negative[0].enabled).toBe(false);
+    expect(state.negative[0].weight).toBe(0.8);
+    expect(state.selectedProfileName).toBe("PresetA");
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+
+  it("5.3 deleteProfile: 指定されたプロファイルを正常に削除し、選択状態であれば選択解除すること", async () => {
+    // Arrange
+    state.selectedFile = "test_profile.yaml";
+    state.profiles = [
+      { name: "PresetA", states: [] },
+      { name: "PresetB", states: [] },
+    ];
+    state.selectedProfileName = "PresetA";
+    
+    const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await deleteProfile("PresetA");
+
+    // Assert
+    expect(state.profiles.length).toBe(1);
+    expect(state.profiles.find(p => p.name === "PresetA")).toBeUndefined();
+    expect(state.selectedProfileName).toBe("");
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+});
+
 
 

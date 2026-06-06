@@ -8,13 +8,17 @@
 - **Infinite Nesting:** Create groups within groups (no depth limit).
 - **Reorder:** Intuitive reordering via Drag & Drop.
 
-### 1.2 Prompt Editing
+### 1.2 Prompt Editing & Adjustment
 - **Enable/Disable:** Temporarily disable prompts via checkboxes without deleting them. Disabling a parent group excludes all child elements from output.
-- **Weighting:** GUI adjustment for weights (e.g., `(word:1.2)` in SD WebUI format). Includes a reset button to restore `1.0`.
+- **Weighting:** Features a compact slider UI (`0.1` to `2.0`) next to each prompt chip for intuitive adjustments. Reset instantly to `1.0` with the "↺" button on the right edge of the slider.
+- **Toggle Slider Visibility:** You can turn the weight slider ON/OFF in settings (gear icon). The choice is remembered (LocalStorage) even after reloading the page.
 - **Tag Autocomplete Integration:** If `a1111-sd-webui-tagcomplete` is enabled, tag suggestions are available when typing prompts.
 - **Memo:** Attach memos to each prompt, viewable via tooltips.
 
-### 1.3 Random Group
+### 1.3 Exclusive Group Selection (Single-Choice Mode)
+- **Feature Overview:** A toggle switch (teal blue) is placed on the right side of group headers.
+- **Exclusive Logic:** When active, enabling (checking) one prompt inside the group automatically disables (unchecks) all other sibling prompts.
+- **Auto-Cleanup:** If you activate the single-choice mode on a group that already has multiple enabled items, it automatically disables all but the first enabled item.
 - **Dynamic Prompts Syntax:** Supports `{A|B|C}` syntax to select one prompt randomly from the group.
 - **Toggle Switch:** Easily toggle ON/OFF via the "Randomize Group" switch next to the group name.
 - **Visibility:** The group is highlighted with a purple dashed border when in Random Mode.
@@ -57,14 +61,20 @@
 - **Double-click Edit:** Quickly open the edit mode (modal) by double-clicking on a group or prompt item.
 - **Context Menu:** Right-clicking on an item opens a context menu for advanced operations (Duplicate, Delete, Move, etc.).
 
-## 3. File & Settings Management
+## 3. File, Settings & Profiles Management
 
 ### 3.1 YAML Persistence
 - Prompt data is saved in YAML format in a local directory.
 - **Multi-file Management:** Create multiple YAML files for different purposes and switch between them via a dropdown.
 - **File Operations:** Create New, Duplicate, Rename, Delete.
 
-### 3.2 Global Settings
+### 3.2 Profiles (State Snapshot)
+- **Feature Overview:** Save the active/inactive (`enabled`) status and `weight` configurations of all prompts in the current tree as a named snapshot ("Profile").
+- **Batch Application:** Select a saved profile from the dropdown in the toolbar to immediately restore all items to their saved states.
+- **Storage Schema:** Profiles are persisted in the `profiles` field of the respective YAML file.
+- **Delete Feature:** Unnecessary profiles can be deleted individually from the dropdown.
+
+### 3.3 Global Settings
 - **UI Scale:** 3-stage adjustment: Small / Medium / Large.
 - **Language:** Switch between Japanese / English.
 - **Save Location (Storage):** Change the YAML file save directory at the bottom of the sidebar.

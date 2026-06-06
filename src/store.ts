@@ -1,5 +1,5 @@
 import { reactive, watch } from "vue";
-import { PsmItem, DuplicateCheckMode } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState } from "./types";
 import { Logger, setDebugMode } from "./log";
 
 /**
@@ -70,6 +70,16 @@ export const state = reactive({
   lastFile: "",
   /** 重みスライダーを表示するかどうか */
   showWeightSlider: true,
+  /** 保存されているプロファイル（ツリースナップショット） */
+  profiles: [] as PsmProfile[],
+  /** 現在選択（適用）されているプロファイル名 */
+  selectedProfileName: "",
+  /** 非同期処理実行中フラグ */
+  isLoading: false,
+  /** ローディングテキストの翻訳キー */
+  loadingText: "",
+  /** ローディング多重度カウンタ */
+  loadingCount: 0,
 });
 
 /**
@@ -79,7 +89,7 @@ export const state = reactive({
 const cloneNodeRecursive = (node: PsmItem): PsmItem => {
   const newNode = {
     ...JSON.parse(JSON.stringify(node)),
-    id: Date.now() + Math.random(),
+    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
   };
   if (newNode.is_group && newNode.children) {
     newNode.children = newNode.children.map((child: PsmItem) =>
@@ -114,6 +124,7 @@ export const findParentAndItem = (targetId: number, nodes: PsmItem[], parent: Ps
  * クリップボードを経由せず即座に反映されます。
  */
 export const duplicateItem = async (item: PsmItem, parentChildren: PsmItem[]) => {
+  state.selectedProfileName = "";
   const idx = parentChildren.indexOf(item);
   if (idx === -1) return;
   const newItem = cloneNodeRecursive(item);
@@ -159,7 +170,7 @@ export const cancelDelete = () => {
  */
 export const addItem = (list: PsmItem[], is_group: boolean, atIndex?: number) => {
   const newItem: PsmItem = {
-    id: Date.now() + Math.random(),
+    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
     name: "",
     content: "",
     enabled: true,
@@ -191,6 +202,7 @@ export const startEdit = (item: PsmItem) => {
  */
 export const finishEdit = async () => {
   if (!state.editingItem) return;
+  state.selectedProfileName = "";
   try {
     const updateTree = (nodes: PsmItem[]) => {
       for (let i = 0; i < nodes.length; i++) {
@@ -246,6 +258,7 @@ export const cancelEdit = () => {
  * @param mode "all": アイテムごと削除, "only": グループ枠のみ削除し子は親に昇格
  */
 export const deleteItemFromTree = async (item: PsmItem, mode: "all" | "only") => {
+  state.selectedProfileName = "";
   const findAndRemove = (list: PsmItem[]): boolean => {
     // Use loose equality just in case of type drift
     const idx = list.findIndex(n => n && n.id == item.id);
@@ -281,6 +294,7 @@ export const deleteItemFromTree = async (item: PsmItem, mode: "all" | "only") =>
 
 // グループの有効無効切り替え（子要素自体のenabledは変更せず、親の状態が計算プロパティで反映される）
 export const toggleGroupEnabled = async (group: PsmItem) => {
+  state.selectedProfileName = "";
   group.enabled = !group.enabled;
   await savePrompts();
 };
@@ -290,6 +304,7 @@ export const toggleGroupEnabled = async (group: PsmItem) => {
  * 親グループが排他選択（isExclusive）の場合は、他の兄弟要素をすべて無効化する
  */
 export const toggleItemEnabled = async (item: PsmItem, parentChildren: PsmItem[], parentGroup?: PsmItem) => {
+  state.selectedProfileName = "";
   item.enabled = !item.enabled;
   
   if (item.enabled && parentGroup?.isExclusive) {
@@ -308,6 +323,7 @@ export const toggleItemEnabled = async (item: PsmItem, parentChildren: PsmItem[]
  * ONにされた場合、すでに複数有効なものがあれば最初の1つだけを残して無効化する
  */
 export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) => {
+  state.selectedProfileName = "";
   if (forceVal !== undefined) {
     group.isExclusive = forceVal;
   } else {
@@ -333,8 +349,112 @@ export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) =
  * プロンプトアイテムの重み（weight）を 1.0 にリセットする
  */
 export const resetWeight = async (item: PsmItem) => {
+  state.selectedProfileName = "";
   item.weight = 1.0;
   await savePrompts();
+};
+
+/**
+ * ツリー全体から各アイテムの状態（id, enabled, weight）を収集するヘルパー関数
+ */
+const collectStates = (nodes: PsmItem[]): PsmProfileState[] => {
+  const result: PsmProfileState[] = [];
+  const walk = (items: PsmItem[]) => {
+    for (const item of items) {
+      if (!item) continue;
+      result.push({
+        id: item.id,
+        enabled: item.enabled,
+        weight: item.weight
+      });
+      if (item.is_group && item.children) {
+        walk(item.children);
+      }
+    }
+  };
+  walk(nodes);
+  return result;
+};
+
+/**
+ * 現在の状態のスナップショットを指定の名前でプロファイルとして保存する
+ */
+export const saveProfile = async (name: string) => {
+  if (!name.trim()) return;
+  const states = [
+    ...collectStates(state.positive),
+    ...collectStates(state.negative)
+  ];
+  
+  const existingIdx = state.profiles.findIndex(p => p.name === name);
+  if (existingIdx !== -1) {
+    state.profiles[existingIdx].states = states;
+  } else {
+    state.profiles.push({ name, states });
+  }
+  state.selectedProfileName = name;
+  await savePrompts();
+};
+
+/**
+ * 保存されている状態スナップショット（プロファイル）をツリー全体に高速適用する
+ */
+export const applyProfile = async (name: string) => {
+  console.warn(`[PSM Debug] applyProfile called for name: ${name}`);
+  const profile = state.profiles.find(p => p.name === name);
+  if (!profile) {
+    console.warn(`[PSM Debug] Profile not found for name: ${name}`);
+    return;
+  }
+  
+  console.warn(`[PSM Debug] Profile found with ${profile.states.length} states.`);
+  
+  const stateMap = new Map<number, { enabled: boolean; weight: number }>();
+  for (const s of profile.states) {
+    stateMap.set(s.id, { enabled: s.enabled, weight: s.weight });
+    console.warn(`[PSM Debug] mapped s.id: ${s.id} -> enabled: ${s.enabled}, weight: ${s.weight}`);
+  }
+  
+  let appliedCount = 0;
+  const walk = (items: PsmItem[]) => {
+    for (const item of items) {
+      if (!item) continue;
+      const snap = stateMap.get(item.id);
+      if (snap) {
+        console.warn(`[PSM Debug] applying snap to item.id: ${item.id} (${item.name || item.content}). old enabled: ${item.enabled} -> new enabled: ${snap.enabled}`);
+        item.enabled = snap.enabled;
+        item.weight = snap.weight;
+        appliedCount++;
+      } else {
+        console.warn(`[PSM Debug] snap NOT found for item.id: ${item.id} (${item.name || item.content})`);
+      }
+      if (item.is_group && item.children) {
+        walk(item.children);
+      }
+    }
+  };
+  
+  walk(state.positive);
+  walk(state.negative);
+  
+  console.warn(`[PSM Debug] applyProfile completed. Applied ${appliedCount} items.`);
+  
+  state.selectedProfileName = name;
+  await savePrompts();
+};
+
+/**
+ * 指定された名前のプロファイルを削除する
+ */
+export const deleteProfile = async (name: string) => {
+  const idx = state.profiles.findIndex(p => p.name === name);
+  if (idx !== -1) {
+    state.profiles.splice(idx, 1);
+    if (state.selectedProfileName === name) {
+      state.selectedProfileName = "";
+    }
+    await savePrompts();
+  }
 };
 
 
@@ -344,6 +464,7 @@ export const resetWeight = async (item: PsmItem) => {
  * @param enabled true: 有効化, false: 無効化
  */
 export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) => {
+  state.selectedProfileName = "";
   if (!group.children) return;
   const walk = (nodes: PsmItem[]) => {
     for (const node of nodes) {
@@ -360,10 +481,34 @@ export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) 
 };
 
 /**
+ * ローディング表示を開始するヘルパー関数
+ */
+export const startLoading = (textKey: string) => {
+  if (state.loadingCount === 0) {
+    state.loadingText = textKey;
+    state.isLoading = true;
+  }
+  state.loadingCount++;
+};
+
+/**
+ * ローディング表示を終了するヘルパー関数
+ */
+export const stopLoading = () => {
+  state.loadingCount--;
+  if (state.loadingCount <= 0) {
+    state.loadingCount = 0;
+    state.isLoading = false;
+    state.loadingText = "";
+  }
+};
+
+/**
  * サーバーからYAMLファイル一覧を取得する
  * 取得後、選択中のファイルがなければ自動的に最初のファイルを選択する
  */
 export const listFiles = async () => {
+  startLoading("loading");
   try {
     const res = await fetch("/psm/list-files");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -381,6 +526,8 @@ export const listFiles = async () => {
     Logger.debug("Files listed:", state.yamlFiles);
   } catch (e) {
     Logger.error("Failed to list files:", e);
+  } finally {
+    stopLoading();
   }
 };
 
@@ -389,6 +536,7 @@ export const listFiles = async () => {
  */
 export const loadPrompts = async () => {
   if (!state.selectedFile) return;
+  startLoading("loading");
   try {
     Logger.debug(`Loading prompts from ${state.selectedFile}...`);
     const res = await fetch(`/psm/get-prompts?file=${state.selectedFile}`);
@@ -396,6 +544,8 @@ export const loadPrompts = async () => {
     const data = await res.json();
     state.positive = (data.positive || []).filter((i: PsmItem) => i != null);
     state.negative = (data.negative || []).filter((i: PsmItem) => i != null);
+    state.profiles = data.profiles || [];
+    state.selectedProfileName = "";
     
     // last_fileを保存
     if (state.selectedFile !== state.lastFile) {
@@ -405,6 +555,8 @@ export const loadPrompts = async () => {
     Logger.debug("Prompts loaded successfully.");
   } catch (e) {
     Logger.error("Failed to load prompts:", e);
+  } finally {
+    stopLoading();
   }
 };
 
@@ -413,6 +565,7 @@ export const loadPrompts = async () => {
  */
 export const savePrompts = async () => {
   if (!state.selectedFile) return;
+  startLoading("saving");
   try {
     Logger.debug(`Saving prompts to ${state.selectedFile}...`);
     const res = await fetch("/psm/save-prompts", {
@@ -422,13 +575,15 @@ export const savePrompts = async () => {
         file: state.selectedFile,
         positive: state.positive,
         negative: state.negative,
+        profiles: state.profiles,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     Logger.debug("Prompts saved successfully.");
   } catch (e) {
     Logger.error("Failed to save prompts:", e);
-    // UI notification would be good here
+  } finally {
+    stopLoading();
   }
 };
 
@@ -437,15 +592,20 @@ export const savePrompts = async () => {
  * @param name ファイル名 (拡張子なしでも可)
  */
 export const createYamlFile = async (name: string) => {
-  const filename = name.endsWith(".yaml") ? name : `${name}.yaml`;
-  await fetch("/psm/save-prompts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: filename, positive: [], negative: [] }),
-  });
-  await listFiles();
-  state.selectedFile = filename;
-  await loadPrompts();
+  startLoading("saving");
+  try {
+    const filename = name.endsWith(".yaml") ? name : `${name}.yaml`;
+    await fetch("/psm/save-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: filename, positive: [], negative: [] }),
+    });
+    await listFiles();
+    state.selectedFile = filename;
+    await loadPrompts();
+  } finally {
+    stopLoading();
+  }
 };
 
 /**
@@ -453,15 +613,20 @@ export const createYamlFile = async (name: string) => {
  * @param n 新しいファイル名
  */
 export const duplicateCurrentFile = async (n: string) => {
-  const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
-  await fetch("/psm/duplicate-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ src: state.selectedFile, dst: fn }),
-  });
-  await listFiles();
-  state.selectedFile = fn;
-  await loadPrompts();
+  startLoading("saving");
+  try {
+    const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+    await fetch("/psm/duplicate-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: state.selectedFile, dst: fn }),
+    });
+    await listFiles();
+    state.selectedFile = fn;
+    await loadPrompts();
+  } finally {
+    stopLoading();
+  }
 };
 
 /**
@@ -469,26 +634,36 @@ export const duplicateCurrentFile = async (n: string) => {
  * @param n 新しいファイル名
  */
 export const renameCurrentFile = async (n: string) => {
-  const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
-  await fetch("/psm/rename-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ src: state.selectedFile, dst: fn }),
-  });
-  await listFiles();
-  state.selectedFile = fn;
+  startLoading("saving");
+  try {
+    const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+    await fetch("/psm/rename-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: state.selectedFile, dst: fn }),
+    });
+    await listFiles();
+    state.selectedFile = fn;
+  } finally {
+    stopLoading();
+  }
 };
 
 /**
  * 現在のファイルを削除する
  */
 export const deleteCurrentFile = async () => {
-  await fetch(`/psm/delete-file?file=${state.selectedFile}`, {
-    method: "DELETE",
-  });
-  state.selectedFile = "";
-  await listFiles();
-  await loadPrompts();
+  startLoading("saving");
+  try {
+    await fetch(`/psm/delete-file?file=${state.selectedFile}`, {
+      method: "DELETE",
+    });
+    state.selectedFile = "";
+    await listFiles();
+    await loadPrompts();
+  } finally {
+    stopLoading();
+  }
 };
 
 
@@ -651,7 +826,7 @@ const parsePrompts = (raw: string): PsmItem[] => {
     .map((s) => s.trim())
     .filter((s) => s)
     .map((s) => ({
-      id: Date.now() + Math.random(),
+      id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
       name: "",
       content: s,
       enabled: true,
@@ -811,3 +986,5 @@ export const setDuplicateCheckMode = async (mode: DuplicateCheckMode) => {
   saveSettingsLocal();
   clearDuplicateHighlight();
 };
+
+

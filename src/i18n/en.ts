@@ -8,7 +8,14 @@ export const en = {
   applyAndClose: "Apply & Close (Ctrl+Shift+Enter)",
   saveDir: "Save Directory Path",
   save: "Save",
+  loading: "Loading...",
+  saving: "Saving...",
   confirmFileDelete: "Are you sure you want to delete the file?",
+  profiles: "Profiles",
+  saveProfile: "Save Profile",
+  newProfileName: "Profile Name",
+  deleteProfile: "Delete Profile",
+  confirmProfileDelete: "Are you sure you want to delete this profile?",
   
   // Context Menu
   newPromptBelow: "New Prompt (Below)",

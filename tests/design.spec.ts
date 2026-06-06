@@ -5,19 +5,27 @@ async function forceEnglish(page: Page) {
   const psmApp = page.locator("#psm_app_root_container");
   await psmApp.waitFor();
 
+  // 初期ロードのローディング表示が消滅するのを確実に待つ
+  const loadingOverlay = page.getByTestId("loading-overlay");
+  await loadingOverlay.waitFor({ state: "hidden", timeout: 15000 });
+
   const sidebar = psmApp.getByTestId("controls-bar");
   await sidebar.waitFor();
 
   const enBtn = sidebar.locator(".v-btn", { hasText: /^EN$/ });
-  await enBtn.click({ force: true });
-  await page.waitForTimeout(500); // 反応を待つ
+  await enBtn.click();
+  
+  // 翻訳が適用され、"Show Warning" のテキストが可視になるのを待つ
+  const showWarningText = sidebar.getByText("Show Warning");
+  await showWarningText.waitFor({ state: "visible", timeout: 15000 });
 }
 
 test.describe("PSM Design and CSS Verification Test Suite", () => {
   let uniq = "";
   let tempFileName = "";
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     page.on("console", msg => {
       if (msg.type() === "error" || msg.type() === "warning") {
         console.log(`[Browser Console] ${msg.type()}: ${msg.text()}`);
@@ -72,7 +80,9 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     
     // ダイアログが閉じるのを確実に待つ
     await page.getByTestId("yaml-modal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.waitForTimeout(1000); // 作成処理待ち
+    // ローディング表示が消滅するのを確実に待つ
+    const loadingOverlay = page.getByTestId("loading-overlay");
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 15000 });
 
     // もしイベント競合などでPSM全体が閉じてしまっている場合は、再度開く
     const psmContainer = page.locator("#psm_app_root_container");
@@ -111,7 +121,9 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
       const deleteBtn = page.locator("button[title='Delete']");
       if (await deleteBtn.isVisible({ timeout: 2000 })) {
         await deleteBtn.click();
-        await page.waitForTimeout(500);
+        // ローディング表示が消滅するのを確実に待つ
+        const loadingOverlay = page.getByTestId("loading-overlay");
+        await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
       }
     } catch (e) {
       console.log("Cleanup failed or file already deleted.", e);
@@ -308,12 +320,7 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     const groupContainer = page.locator(".psm-node__group", { hasText: groupName }).first();
     await expect(groupContainer).toBeVisible();
 
-    // Act 2: 排他択一 (Exclusive) スイッチを ON に変更
-    const exclusiveSwitch = groupContainer.locator(".v-switch", { hasText: /Exclusive/i }).first();
-    await exclusiveSwitch.click();
-    await page.waitForTimeout(500);
-
-    // Act 3: グループ内に 2 つのプロンプトを追加
+    // Act 2: グループ内に 2 つのプロンプトを追加（排他はまだ OFF）
     await groupContainer.getByTestId("inline-add-prompt").click();
     await page.getByTestId("edit-content-input").locator("textarea").first().fill("tagA");
     await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
@@ -336,17 +343,26 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     await expect(chipA).toBeVisible();
     await expect(chipB).toBeVisible();
 
-    // Act 4: Chip A をクリックして有効化
-    await chipA.click();
-    await page.waitForTimeout(300);
+    // 両方とも enabled: true （打ち消し線なし）
+    await expect(chipA.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
+    await expect(chipB.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
 
-    // Act 5: Chip B をクリックして有効化
+    // Act 3: 排他択一 (Exclusive) スイッチを ON に変更
+    const exclusiveSwitch = groupContainer.locator(".v-switch", { hasText: /Exclusive/i }).first();
+    await exclusiveSwitch.click();
+    await page.waitForTimeout(500);
+
+    // Assert: 排他択一により、2つ目の要素 (Chip B) が自動的に無効化（打ち消し線あり）されること
+    await expect(chipA.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
+    await expect(chipB.locator("span.text-truncate")).toHaveClass(/text-decoration-line-through/);
+
+    // Act 4: 無効化されている Chip B をクリックして有効化する
     await chipB.click();
     await page.waitForTimeout(500);
 
-    // Assert: Chip A が自動的に無効化（enabled: false -> 打ち消し線スタイル適用）されたことをアサーション
-    const labelA = chipA.locator("span.text-truncate");
-    await expect(labelA).toHaveClass(/text-decoration-line-through/);
+    // Assert: Chip B が有効になり、Chip A が自動的に無効化（打ち消し線スタイル適用）されたことをアサーション
+    await expect(chipA.locator("span.text-truncate")).toHaveClass(/text-decoration-line-through/);
+    await expect(chipB.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
 
     // Assert: Chip B が有効化されており、その下にウェイトスライダーとリセットボタンがあることを検証
     const sliderContainer = groupContainer.locator(".psm-node__weight-container").first();
@@ -358,5 +374,131 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     const resetBtn = sliderContainer.locator(".psm-node__weight-reset");
     await expect(resetBtn).toBeVisible();
   });
+
+  test("6. Profile creation, application, and deletion should work reactively", async ({ page }) => {
+    // Arrange
+    const profileName = `Profile_${uniq}`;
+    const promptAName = `PromptA_${uniq}`;
+    const promptBName = `PromptB_${uniq}`;
+
+    const loadingOverlay = page.getByTestId("loading-overlay");
+
+    // PositiveペインにPrompt Aを追加（デフォルト有効）
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("tagA");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(promptAName);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // Prompt Bを追加し、無効化する
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("tagB");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(promptBName);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    const chipA = page.locator(".v-chip", { hasText: promptAName }).first();
+    const chipB = page.locator(".v-chip", { hasText: promptBName }).first();
+
+    // Chip B をクリックして無効化する（デフォルトは有効になって追加されるので、一回クリックして無効化）
+    await chipB.click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // Chip A が有効（打ち消し線なし）、Chip B が無効（打ち消し線あり）であることをアサーション
+    await expect(chipA.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
+    await expect(chipB.locator("span.text-truncate")).toHaveClass(/text-decoration-line-through/);
+
+    // Act 1: プロファイルの新規保存
+    // ツールバーの保存ボタンをクリック
+    const saveBtn = page.getByTestId("save-profile-btn");
+    await saveBtn.click();
+    await page.waitForTimeout(300);
+
+    // ダイアログに入力して保存
+    const dialog = page.locator(".v-card", { hasText: /Save Profile/i }).first();
+    await expect(dialog).toBeVisible();
+    
+    const profileInput = dialog.locator("input[type='text']").first();
+    await profileInput.click();
+    await page.waitForTimeout(100);
+    await profileInput.fill(profileName);
+    await profileInput.dispatchEvent("input");
+    await profileInput.dispatchEvent("change");
+    await page.waitForTimeout(300);
+
+    // 新規プロファイル保存ダイアログの「保存」ボタンをクリックして確定
+    const saveConfirmBtn = dialog.locator("button", { hasText: /Save|保存/i }).first();
+    await saveConfirmBtn.click();
+    await dialog.waitFor({ state: "hidden", timeout: 10000 });
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // Assert 1: プロファイルが選択され、保存されたこと
+    const select = page.locator(".v-select", { hasText: /Profiles/i }).first();
+    await expect(select).toContainText(profileName);
+
+    // Act 2: ツリー状態の変更（Aを無効化、Bを有効化）
+    await chipA.click(); // Aを無効化
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+    await chipB.click(); // Bを有効化
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // Aが無効、Bが有効であることを確認
+    await expect(chipA.locator("span.text-truncate")).toHaveClass(/text-decoration-line-through/);
+    await expect(chipB.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
+
+    // Act 3: プロファイルの適用
+    // v-select をクリックしてプルダウンを開く
+    await select.click();
+    await page.waitForTimeout(500); // プルダウンアニメーションを待つ
+    
+    // role="option" を指定して、プロファイル名を持つアイテムを確実にクリック
+    const option = page.getByRole("option", { name: profileName }).first();
+    await option.waitFor({ state: "visible", timeout: 5000 });
+    await option.click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // もし Positive ペインが閉じている場合は、クリックして展開する
+    const addPromptBtnAfterApply = page.getByTestId("root-add-prompt").first();
+    if (await addPromptBtnAfterApply.isHidden()) {
+      console.log("Positive pane was closed, re-opening...");
+      const positivePane = page.locator(".psm-pane").filter({ hasText: /Positive/i }).first();
+      const collapsedPlaceholder = positivePane.locator(".psm-pane__placeholder--hoverable").first();
+      await collapsedPlaceholder.click();
+      await page.waitForTimeout(500); // 展開アニメーションを待つ
+    }
+
+    // ロケーターの再評価（再レンダリング対策）
+    const chipARefreshed = page.locator(".v-chip", { hasText: promptAName }).first();
+    const chipBRefreshed = page.locator(".v-chip", { hasText: promptBName }).first();
+
+    // Assert 3: 状態が元通り復元されたこと（Aが有効, Bが無効）
+    await expect(chipARefreshed.locator("span.text-truncate")).not.toHaveClass(/text-decoration-line-through/);
+    await expect(chipBRefreshed.locator("span.text-truncate")).toHaveClass(/text-decoration-line-through/);
+
+    // Act 4: プロファイルの削除
+    const deleteProfileBtn = page.getByTestId("delete-profile-btn");
+    await deleteProfileBtn.click();
+    await page.waitForTimeout(300);
+
+    const deleteConfirmDialog = page.locator(".v-card", { hasText: /Delete Profile/i }).first();
+    await expect(deleteConfirmDialog).toBeVisible();
+    await deleteConfirmDialog.locator("button", { hasText: /Delete|削除/i }).first().click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+    
+    // ダイアログとそれに関連するオーバーレイが完全に隠れる（非表示になる）のを確実に待つ
+    await deleteConfirmDialog.waitFor({ state: "hidden", timeout: 10000 });
+    const deleteOverlay = page.locator(".v-overlay", { hasText: /Delete Profile/i }).first();
+    await deleteOverlay.waitFor({ state: "hidden", timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    // Assert 4: プロファイル選択状態が解除されたこと
+    const selection = select.locator(".v-select__selection");
+    await expect(selection).not.toBeVisible();
+  });
 });
+
 

@@ -1,47 +1,47 @@
-# 📘 Prompt Struct Manager (PSM) Quality Assurance (v2.0)
+# 📘 Prompt Struct Manager (PSM) 品質保証仕様書 (v2.0)
 
-**Last Updated:** 2026-01-26
-**Scope:** E2E Testing using Playwright
+**最終更新日:** 2026-06-06
+**検証範囲:** 3層の自動テストスイート（単体テスト、バックエンドテスト、E2Eテスト）
 
 ---
 
-## 1. Test Strategy
-We have consolidated all automated tests into a single E2E suite (`tests/e2e.spec.ts`) to ensure robust verification of the "real" user experience, including:
-- Vuetify UI interactions
-- Drag and Drop operations
-- Multi-language support (I18n)
+## 1. テスト戦略
+PSM Ver2の品質保証は、デグレードの防止、UIの一貫性、およびAPIの安定性を保証するために、3層に分かれた階層的な自動テストアーキテクチャの上に構築されています。
+- **バックエンドAPIテスト (pytest):** サーバー設定、ファイルI/O操作、およびプロンプトのコンパイルロジックの安定性を保証します。
+- **フロントエンド単体テスト (Vitest):** モック環境下で、カテゴリ内排他選択、プロファイル復元、重複検出などのコアなビジネスロジックの状態制御を検証します。
+- **E2Eテスト (Playwright):** ヘッドレスブラウザを制御し、実際のユーザーインタラクション、ドラッグ＆ドロップ、ウィジェット描画（コンパクトなウェイトスライダーなど）、およびキーボードショートカットのマッピングを検証します。
 
-## 2. Test Scenarios (Implements in `e2e.spec.ts`)
+---
 
-### 2.1 Basic Operations
-- **Startup & Wizard**: Verify Setup Wizard appears on fresh start and completes successfully (Directory -> Filename).
-- **Startup**: Verify panel opens.
-- **I18n**: Force English mode (`en`) to ensure consistent text assertions.
-- **CRUD**: Create, Rename, and Delete files.
+## 2. テストスイートとテストシナリオ
 
-### 2.2 Tree Operations
-- **Node Management**: Add Prompt/Group to root.
-- **Inline Actions**: Add items inside groups.
-- **Editing**: Verify modal interactions.
+### 2.1 バックエンドテスト (`pytest` - 16件)
+- **API設定:** `get-config` および `set-config` のロジック、保存先フォルダー構造、およびフォールバック先の検証。
+- **YAML I/O:** YAMLファイルの安全な保存/読み込み、ファイル内の `profiles` 項目の統合、ファイルの複製、リネーム、および削除の検証。
+- **文字列解析:** ポジティブ/ネガティブプロンプトのクリーンアップ、ウェイト値に対する丸括弧の自動付与、および Dynamic Prompts 構文の変換処理の検証。
 
-### 2.3 Drag and Drop
-- **Drop Zones**: Verify "Open / Drop" and "Add to {name}" zones appear during drag.
-- **Logic**: Verify items are actually moved into groups.
+### 2.2 フロントエンド単体テスト (`Vitest` - 20件)
+- **基本操作:** ストア状態におけるノードの追加、編集、削除、およびドラッグ移動の検証。
+- **カテゴリ内排他選択 (択一モード):**
+  - 排他グループ内の1つのアイテムを有効化すると、他のすべての兄弟要素が自動的に無効化されることを確認。
+  - すでに複数の有効なアイテムが存在するグループで択一モードを有効にした際、最初の1つだけを残して他の有効アイテムが自動的に無効化クリーンアップされることを確認。
+- **プロファイルスナップショット:**
+  - スナップショットのキャプチャ（`saveProfile`）、プロファイル適用時の状態一括復元、およびプロファイルの削除機能の検証。
+- **重複チェック:** `none` (無効), `warn` (警告表示), `error` (ブロック) の各モード切り替え時の挙動検証。
 
-### 2.4 Keyboard Shortcuts
-- **Navigation**: Verify `Insert` to add items.
-- **Closing**: Verify `Escape` closes modals and the panel.
+### 2.3 E2Eテスト (`Playwright` - 6件)
+- **セットアップウィザード:** 初回起動時の保存先フォルダー設定画面が表示され、正常に保存できることを検証。
+- **ファイル管理 (CRUD):** サイドバーのボタンを通じてファイルを作成、リネーム、および削除できることを検証。
+- **スライダー操作:** コンパクトスライダーをドラッグした際、ウェイト値がリアルタイムに更新され、WebUIへのコンパイル時に `(word:weight)` 形式で反映されることを検証。
+- **プロファイル UI ワークフロー:** ツールバーから新しいプロファイルスナップショットを作成、適用し、状態が変化すること、およびプロファイルを削除できることを検証.
+- **ドラッグ＆ドロップ:** フォルダ間でノードをドラッグし、階層構造のネストや並び替えが正しく行われることを検証。
+- **キーボードショートカット:** `F2` での編集開始、`Space` での有効/無効切り替え、`Insert` での新規プロンプト作成など、標準ショートカットキーのマッピングを検証。
 
-### 2.5 Mouse Operations
-- **Double Click**: Verify double-clicking an item/group opens the edit modal.
+---
 
-### 2.6 Duplicate Detection
-- **Modes**: Verify "None", "Warn", and "Error" modes in the sidebar.
-- **Validation**: Verify duplicates across Positive/Negative are detected on Apply.
-- **Dialogs**: Verify Warning/Error dialogs appear and handle Confirm/Cancel/Enter/Esc correctly.
-- **Highlighting**: Verify items are highlighted in Yellow (`bg-warning`) or Red (`bg-error`) after detection.
-
-## 3. Execution
-```bash
-npx playwright test
-```
+## 3. テストの実行方法
+実行コマンドの詳細は [doc/DEVELOPMENT.md](../doc/DEVELOPMENT.md) を参照してください。
+- フロントエンド単体テスト: `npm run test:unit`
+- バックエンドAPIテスト: `pytest` (venv環境下では `..\..\venv\Scripts\python -m pytest`)
+- E2E統合テスト: `npx playwright test tests/design.spec.ts`
+- 一括実行スクリプト (Windows): `.\test_local.bat`

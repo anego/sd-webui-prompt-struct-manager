@@ -80,20 +80,6 @@ const openPane = () => emit("update:isOpen", true);
           <v-btn
             size="x-small"
             variant="text"
-            icon="mdi-file-plus"
-            @click.stop="addItem(items, false)"
-            :title="t('addPrompt')"
-          ></v-btn>
-          <v-btn
-            size="x-small"
-            variant="text"
-            icon="mdi-folder-plus"
-            @click.stop="addItem(items, true)"
-            :title="t('addGroup')"
-          ></v-btn>
-          <v-btn
-            size="x-small"
-            variant="text"
             icon="mdi-close"
             @click.stop="closePane"
             :title="t('close')"

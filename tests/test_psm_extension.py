@@ -299,7 +299,7 @@ def test_get_prompts_not_found(test_client: TestClient, temp_extension_env: Path
     
     # Assert
     assert response.status_code == 200
-    assert response.json() == {"positive": [], "negative": []}
+    assert response.json() == {"positive": [], "negative": [], "profiles": []}
 
 def test_duplicate_file(test_client: TestClient, temp_extension_env: Path) -> None:
     """
@@ -400,3 +400,38 @@ def test_delete_file_not_found(test_client: TestClient, temp_extension_env: Path
     # Assert
     assert response.status_code == 200
     assert response.json() == {"status": "error", "message": "File not found"}
+
+def test_save_and_get_prompts_with_profiles(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    profiles 状態スナップショットデータを含むプロンプトデータの保存と取得が
+    YAMLフォーマットで正しく行えることを検証します。
+    """
+    # Arrange
+    prompt_payload: Dict[str, object] = {
+        "file": "test_profile_prompt.yaml",
+        "positive": [{"id": 1, "text": "masterpiece"}],
+        "negative": [{"id": 2, "text": "low quality"}],
+        "profiles": [
+            {
+                "name": "Profile1",
+                "states": [{"id": 1, "enabled": True, "weight": 1.2}]
+            }
+        ]
+    }
+    
+    # Act: 保存の実行
+    save_response = test_client.post("/psm/save-prompts", json=prompt_payload)
+    
+    # Assert: 保存成功の確認
+    assert save_response.status_code == 200
+    assert save_response.json() == {"status": "success"}
+    
+    # Act: 取得の実行
+    get_response = test_client.get("/psm/get-prompts?file=test_profile_prompt.yaml")
+    
+    # Assert: 取得結果が一致することの確認
+    assert get_response.status_code == 200
+    retrieved_data: Dict[str, object] = get_response.json()
+    assert retrieved_data["positive"] == prompt_payload["positive"]
+    assert retrieved_data["negative"] == prompt_payload["negative"]
+    assert retrieved_data["profiles"] == prompt_payload["profiles"]

@@ -142,11 +142,13 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
             
             positive_list = body.get("positive", [])
             negative_list = body.get("negative", [])
+            profiles_list = body.get("profiles", [])
             
             result = storage.save_prompts_data(
                 decoded_file,
                 positive_list if isinstance(positive_list, list) else [],
-                negative_list if isinstance(negative_list, list) else []
+                negative_list if isinstance(negative_list, list) else [],
+                profiles_list if isinstance(profiles_list, list) else []
             )
             return JSONResponse(content=result)
         except Exception as e:

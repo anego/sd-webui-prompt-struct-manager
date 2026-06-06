@@ -19,9 +19,9 @@ def list_yaml_files() -> List[str]:
 
 def get_prompts_data(file_name: str) -> Dict[str, List[Dict[str, object]]]:
     """
-    指定された YAML ファイルからプロンプトデータ（positive/negative）をロードします。
+    指定された YAML ファイルからプロンプトデータ（positive/negative/profiles）をロードします。
     """
-    empty_structure: Dict[str, List[Dict[str, object]]] = {"positive": [], "negative": []}
+    empty_structure: Dict[str, List[Dict[str, object]]] = {"positive": [], "negative": [], "profiles": []}
     if not file_name:
         return empty_structure
 
@@ -41,18 +41,20 @@ def get_prompts_data(file_name: str) -> Dict[str, List[Dict[str, object]]]:
             
         pos = data.get("positive")
         neg = data.get("negative")
+        profiles = data.get("profiles")
         
         return {
             "positive": pos if isinstance(pos, list) else [],
-            "negative": neg if isinstance(neg, list) else []
+            "negative": neg if isinstance(neg, list) else [],
+            "profiles": profiles if isinstance(profiles, list) else []
         }
     except Exception as e:
         print(f"[PSM ERROR] get_prompts_data failed for {file_name}: {e}")
         return empty_structure
 
-def save_prompts_data(file_name: str, positive_list: List[object], negative_list: List[object]) -> Dict[str, str]:
+def save_prompts_data(file_name: str, positive_list: List[object], negative_list: List[object], profiles_list: Optional[List[object]] = None) -> Dict[str, str]:
     """
-    プロンプトデータ（positive/negative）を YAML 形式で保存します。
+    プロンプトデータ（positive/negative/profiles）を YAML 形式で保存します。
     """
     if not file_name:
         return {"status": "error", "message": "Invalid file name"}
@@ -67,7 +69,8 @@ def save_prompts_data(file_name: str, positive_list: List[object], negative_list
         with path.open('w', encoding='utf-8') as f:
             yaml.dump({
                 "positive": positive_list, 
-                "negative": negative_list
+                "negative": negative_list,
+                "profiles": profiles_list if profiles_list is not None else []
             }, f, allow_unicode=True, sort_keys=False)
             
         return {"status": "success"}

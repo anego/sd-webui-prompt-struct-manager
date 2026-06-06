@@ -8,7 +8,14 @@ export const ja = {
   applyAndClose: "反映＆閉じる (Ctrl+Shift+Enter)",
   saveDir: "保存先フォルダパス",
   save: "保存",
+  loading: "読み込み中...",
+  saving: "保存中...",
   confirmFileDelete: "本当にファイルを削除しますか？",
+  profiles: "プロファイル",
+  saveProfile: "プロファイル保存",
+  newProfileName: "プロファイル名",
+  deleteProfile: "プロファイル削除",
+  confirmProfileDelete: "本当にこのプロファイルを削除しますか？",
   
   // Context Menu
   newPromptBelow: "新規プロンプト (下)",

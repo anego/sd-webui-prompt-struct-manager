@@ -25,6 +25,17 @@ export interface PsmItem {
   isExclusive?: boolean;
 }
 
+export interface PsmProfileState {
+  id: number;
+  enabled: boolean;
+  weight: number;
+}
+
+export interface PsmProfile {
+  name: string;
+  states: PsmProfileState[];
+}
+
 
 /**
  * 重複プロンプトのチェック設定モード

@@ -15,10 +15,22 @@ export interface PsmItem {
   
   is_group: boolean;    // Is group or not
   isRandom?: boolean;   // Random group (Output in Dynamic Prompts {A|B} format)
+  isExclusive?: boolean;// Exclusive group selection (single-choice mode) flag
   isOpen?: boolean;     // Expansion state for group (UI)
   children?: PsmItem[]; // Children array (if is_group: true)
   
   depth?: number;       // For display: Hierarchy depth (Computed or temp attached)
+}
+
+export interface PsmProfileState {
+  id: number;           // Target prompt ID
+  enabled: boolean;     // Enable/Disable flag at snapshot
+  weight: number;       // Weight value at snapshot
+}
+
+export interface PsmProfile {
+  name: string;         // Profile name
+  states: PsmProfileState[]; // State list for each item
 }
 ```
 
@@ -46,6 +58,13 @@ negative:
     content: "lowres, bad anatomy"
     enabled: true
     is_group: false
+
+profiles:
+  - name: "MyProfile"
+    states:
+      - id: 1234567890.456
+        enabled: true
+        weight: 1.2
 ```
 
 - **positive:** Root array for the Positive prompt tree.
@@ -71,6 +90,8 @@ Browser-specific UI settings.
   "lang": "en",
   "last_file": "my_prompts.yaml",
   "sidebar_open": true,
-  "toggle_shortcut": "Ctrl+Q"
+  "toggle_shortcut": "Ctrl+Q",
+  "duplicate_check_mode": "none",
+  "show_weight_slider": true
 }
 ```

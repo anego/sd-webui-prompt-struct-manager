@@ -15,10 +15,22 @@ export interface PsmItem {
   
   is_group: boolean;    // グループか否か
   isRandom?: boolean;   // ランダムグループ (Dynamic Prompts {A|B} 形式で出力)
+  isExclusive?: boolean;// カテゴリ内排他選択（択一モード）有効フラグ
   isOpen?: boolean;     // グループの場合の開閉状態 (UI用)
   children?: PsmItem[]; // 子アイテムの配列 (is_group: true の場合)
   
   depth?: number;       // 表示用: 階層の深さ (計算プロパティまたは一時付与)
+}
+
+export interface PsmProfileState {
+  id: number;           // 対象プロンプトのID
+  enabled: boolean;     // 有効/無効フラグ
+  weight: number;       // ウェイト値
+}
+
+export interface PsmProfile {
+  name: string;         // プロファイル名
+  states: PsmProfileState[]; // 各アイテムの状態リスト
 }
 ```
 
@@ -46,6 +58,13 @@ negative:
     content: "lowres, bad anatomy"
     enabled: true
     is_group: false
+
+profiles:
+  - name: "MyProfile"
+    states:
+      - id: 1234567890.456
+        enabled: true
+        weight: 1.2
 ```
 
 - **positive:** Positiveプロンプトツリーのルート配列。
@@ -71,6 +90,8 @@ Pythonバックエンドが管理する設定ファイル。
   "lang": "ja",
   "last_file": "my_prompts.yaml",
   "sidebar_open": true,
-  "toggle_shortcut": "Ctrl+Q"
+  "toggle_shortcut": "Ctrl+Q",
+  "duplicate_check_mode": "none",
+  "show_weight_slider": true
 }
 ```

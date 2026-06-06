@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, provide } from "vue";
+import { ref, watch, onMounted, onUnmounted, provide, computed } from "vue";
 import {
   state,
   loadPrompts,
@@ -18,6 +18,9 @@ import {
   findParentAndItem,
   detectDuplicates,
   clearDuplicateHighlight,
+  saveProfile,
+  applyProfile,
+  deleteProfile,
 } from "./store";
 import { PsmItem } from "./types";
 import PsmEditModal from "./components/PsmEditModal.vue";
@@ -37,7 +40,46 @@ const { t } = useI18n();
 const buildTimestamp = __BUILD_TIMESTAMP__;
 
 // ダイアログの表示状態管理
-const dialogs = ref({ new: false, copy: false, rename: false, import: false, generate: false });
+const dialogs = ref({
+  new: false,
+  copy: false,
+  rename: false,
+  import: false,
+  generate: false,
+  profileNew: false,
+  profileDelete: false,
+});
+const newProfileNameInput = ref("");
+
+const openSaveProfileDialog = () => {
+  newProfileNameInput.value = state.selectedProfileName || "";
+  dialogs.value.profileNew = true;
+};
+
+const handleSaveProfile = async () => {
+  if (!newProfileNameInput.value.trim()) return;
+  await saveProfile(newProfileNameInput.value.trim());
+  dialogs.value.profileNew = false;
+  newProfileNameInput.value = "";
+};
+
+const handleProfileSelect = async (name: string) => {
+  console.warn(`[PSM App Debug] handleProfileSelect triggered with name: ${name}`);
+  if (name) {
+    await applyProfile(name);
+  }
+};
+
+const openDeleteProfileDialog = () => {
+  if (!state.selectedProfileName) return;
+  dialogs.value.profileDelete = true;
+};
+
+const handleDeleteProfile = async () => {
+  if (!state.selectedProfileName) return;
+  await deleteProfile(state.selectedProfileName);
+  dialogs.value.profileDelete = false;
+};
 const duplicateDialog = ref({ show: false, mode: "warn" as "warn" | "error" });
 const menuState = ref({ visible: false, x: 0, y: 0, items: [] as unknown[] });
 
@@ -381,6 +423,44 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
                ({{ buildTimestamp }})
             </span>
           </v-toolbar-title>
+          <!-- プロファイル選択・保存・削除 UI -->
+          <div v-if="state.selectedFile" class="d-flex align-center ga-2 ml-4 mr-2" style="width: 280px;">
+            <v-select
+              v-model="state.selectedProfileName"
+              :items="state.profiles.map(p => p.name)"
+              :label="t('profiles')"
+              density="compact"
+              hide-details
+              variant="outlined"
+              :menu-props="{ zIndex: 20000010 }"
+              @update:modelValue="handleProfileSelect"
+              class="flex-grow-1"
+              style="max-width: 180px;"
+              attach
+            ></v-select>
+            <v-btn
+              icon
+              size="x-small"
+              @click.stop="openSaveProfileDialog"
+              :title="t('saveProfile')"
+              color="primary"
+              data-testid="save-profile-btn"
+            >
+              <v-icon size="small">mdi-content-save</v-icon>
+            </v-btn>
+            <v-btn
+              icon
+              size="x-small"
+              :disabled="!state.selectedProfileName"
+              @click.stop="openDeleteProfileDialog"
+              :title="t('deleteProfile')"
+              color="error"
+              data-testid="delete-profile-btn"
+            >
+              <v-icon size="small">mdi-delete</v-icon>
+            </v-btn>
+          </div>
+
           <v-spacer></v-spacer>
           <div class="d-flex align-center ga-2 mr-2">
             <v-btn
@@ -473,6 +553,58 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         v-model:renameDialog="dialogs.rename"
         v-model:importDialog="dialogs.import"
       />
+
+      <!-- プロファイル新規保存ダイアログ -->
+      <v-dialog v-model="dialogs.profileNew" max-width="400" attach>
+        <v-card>
+          <v-card-title class="text-h6 pb-2">
+            💾 {{ t('saveProfile') }}
+          </v-card-title>
+          <v-card-text>
+            <v-text-field
+              v-model="newProfileNameInput"
+              :label="t('newProfileName')"
+              variant="outlined"
+              density="compact"
+              autofocus
+              @keydown.enter="handleSaveProfile"
+            ></v-text-field>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn variant="text" @click="dialogs.profileNew = false" data-testid="profile-save-cancel-btn">
+              {{ t('cancel') }}
+            </v-btn>
+            <v-btn color="primary" variant="elevated" @click="handleSaveProfile" :disabled="!newProfileNameInput.trim()" data-testid="profile-save-confirm-btn">
+              {{ t('save') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- プロファイル削除確認ダイアログ -->
+      <v-dialog v-model="dialogs.profileDelete" max-width="400" attach>
+        <v-card>
+          <v-card-title class="text-h6 pb-2">
+            ⚠️ {{ t('deleteProfile') }}
+          </v-card-title>
+          <v-card-text>
+            {{ t('confirmProfileDelete') }}
+            <div class="mt-2 text-subtitle-1 font-weight-bold text-orange">
+              "{{ state.selectedProfileName }}"
+            </div>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn variant="text" @click="dialogs.profileDelete = false" data-testid="profile-delete-cancel-btn">
+              {{ t('cancel') }}
+            </v-btn>
+            <v-btn color="error" variant="elevated" @click="handleDeleteProfile" data-testid="profile-delete-confirm-btn">
+              {{ t('delete') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
       
       <PsmDuplicateConfirmDialog
         v-model="duplicateDialog.show"
@@ -485,6 +617,30 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         v-model="dialogs.generate"
         @confirm="executeGenerate"
       />
+      
+      <!-- 操作不可のローディングオーバーレイ -->
+      <v-overlay
+        v-model="state.isLoading"
+        class="align-center justify-center psm-loading-overlay"
+        persistent
+        scrim="black"
+        :opacity="0.6"
+        z-index="30000000"
+        attach
+        data-testid="loading-overlay"
+      >
+        <div class="text-center d-flex flex-column align-center ga-3">
+          <v-progress-circular
+            color="orange"
+            indeterminate
+            size="64"
+            width="6"
+          ></v-progress-circular>
+          <div class="text-white text-subtitle-1 font-weight-bold" v-if="state.loadingText">
+            {{ t(state.loadingText) }}
+          </div>
+        </div>
+      </v-overlay>
     </v-app>
   </div>
 </template>
