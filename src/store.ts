@@ -24,8 +24,7 @@ export const state = reactive({
   yamlFiles: [] as string[],
   /** 現在選択中のYAMLファイル名 */
   selectedFile: "",
-  /** 検索クエリ文字列 */
-  searchQuery: "",
+
   /** 設定保存ディレクトリパス */
   configDir: "",
   /** 初期設定済みかどうか */
@@ -78,6 +77,8 @@ export const state = reactive({
   isLoading: false,
   /** ローディングテキストの翻訳キー */
   loadingText: "",
+  /** プロンプト大辞典が検出・マウントされているかどうかのフラグ */
+  hasDictionary: false,
   /** ローディング多重度カウンタ */
   loadingCount: 0,
 });
@@ -226,7 +227,7 @@ export const finishEdit = async () => {
     // 成功後に閉じる
     state.isEditing = false;
   } catch (e) {
-    Logger.error("Failed to finish edit:", e);
+    Logger.error("[Store/Edit] 編集内容の保存処理中にエラーが発生しました。", e);
     // 保存失敗時は閉じないことでユーザーに気付きを与える
     alert("Failed to save changes. Check console for details.");
   }
@@ -400,19 +401,22 @@ export const saveProfile = async (name: string) => {
  * 保存されている状態スナップショット（プロファイル）をツリー全体に高速適用する
  */
 export const applyProfile = async (name: string) => {
-  console.warn(`[PSM Debug] applyProfile called for name: ${name}`);
+  console.info(`[PSM][Store/Profile] プロファイル「${name}」の適用処理を開始します。`);
   const profile = state.profiles.find(p => p.name === name);
   if (!profile) {
-    console.warn(`[PSM Debug] Profile not found for name: ${name}`);
+    console.warn(`[PSM][Store/Profile] 指定されたプロファイル「${name}」が見つかりませんでした。適用をスキップします。`);
     return;
   }
   
-  console.warn(`[PSM Debug] Profile found with ${profile.states.length} states.`);
+  // 適用されるプロファイル定義の詳細情報を折りたたんでテーブル表示
+  console.groupCollapsed(`[PSM][Store/Profile] プロファイル「${name}」からロードされた状態定義の詳細情報を展開します。`);
+  console.debug(`[PSM] 状態定義数: ${profile.states.length} 件`);
+  console.table(profile.states);
+  console.groupEnd();
   
   const stateMap = new Map<number, { enabled: boolean; weight: number }>();
   for (const s of profile.states) {
     stateMap.set(s.id, { enabled: s.enabled, weight: s.weight });
-    console.warn(`[PSM Debug] mapped s.id: ${s.id} -> enabled: ${s.enabled}, weight: ${s.weight}`);
   }
   
   let appliedCount = 0;
@@ -421,12 +425,9 @@ export const applyProfile = async (name: string) => {
       if (!item) continue;
       const snap = stateMap.get(item.id);
       if (snap) {
-        console.warn(`[PSM Debug] applying snap to item.id: ${item.id} (${item.name || item.content}). old enabled: ${item.enabled} -> new enabled: ${snap.enabled}`);
         item.enabled = snap.enabled;
         item.weight = snap.weight;
         appliedCount++;
-      } else {
-        console.warn(`[PSM Debug] snap NOT found for item.id: ${item.id} (${item.name || item.content})`);
       }
       if (item.is_group && item.children) {
         walk(item.children);
@@ -437,7 +438,7 @@ export const applyProfile = async (name: string) => {
   walk(state.positive);
   walk(state.negative);
   
-  console.warn(`[PSM Debug] applyProfile completed. Applied ${appliedCount} items.`);
+  console.info(`[PSM][Store/Profile] プロファイル「${name}」の適用が完了しました。（適用ノード数: ${appliedCount} 件）`);
   
   state.selectedProfileName = name;
   await savePrompts();
@@ -523,9 +524,9 @@ export const listFiles = async () => {
        }
        // Fallback removed to allow unselected state on directory change
     }
-    Logger.debug("Files listed:", state.yamlFiles);
+    Logger.debug("[Store/Data] サーバーから取得したYAMLファイルの一覧を読み込みました。", state.yamlFiles);
   } catch (e) {
-    Logger.error("Failed to list files:", e);
+    Logger.error("[Store/Data] サーバーからのYAMLファイル一覧取得処理に失敗しました。", e);
   } finally {
     stopLoading();
   }
@@ -538,7 +539,7 @@ export const loadPrompts = async () => {
   if (!state.selectedFile) return;
   startLoading("loading");
   try {
-    Logger.debug(`Loading prompts from ${state.selectedFile}...`);
+    Logger.debug(`[Store/Data] ファイル「${state.selectedFile}」からのプロンプト読み込み処理を開始します。`);
     const res = await fetch(`/psm/get-prompts?file=${state.selectedFile}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -547,14 +548,24 @@ export const loadPrompts = async () => {
     state.profiles = data.profiles || [];
     state.selectedProfileName = "";
     
+    // 読み込まれたプロンプトデータの要約をテーブルとグループで可視化
+    console.groupCollapsed(`[PSM][Store/Data] ファイル「${state.selectedFile}」から読み込まれたプロンプトツリー構造の要約を展開します。`);
+    console.debug(`[PSM][Store/Data] 読み込まれたPositiveプロンプトのノード数: ${state.positive.length} 件`);
+    console.debug(`[PSM][Store/Data] 読み込まれたNegativeプロンプトのノード数: ${state.negative.length} 件`);
+    if (state.profiles.length > 0) {
+      console.debug(`[PSM][Store/Data] ファイル内から検出されたプロファイルの一覧です。`);
+      console.table(state.profiles.map(p => ({ "プロファイル名": p.name, "定義状態数": p.states.length })));
+    }
+    console.groupEnd();
+
     // last_fileを保存
     if (state.selectedFile !== state.lastFile) {
       state.lastFile = state.selectedFile;
       saveSettingsLocal();
     }
-    Logger.debug("Prompts loaded successfully.");
+    Logger.info(`[Store/Data] ファイル「${state.selectedFile}」からプロンプトデータを正常に読み込みました。`);
   } catch (e) {
-    Logger.error("Failed to load prompts:", e);
+    Logger.error("[Store/Data] 選択されたYAMLファイルからのプロンプト読み込みに失敗しました。", e);
   } finally {
     stopLoading();
   }
@@ -567,7 +578,7 @@ export const savePrompts = async () => {
   if (!state.selectedFile) return;
   startLoading("saving");
   try {
-    Logger.debug(`Saving prompts to ${state.selectedFile}...`);
+    Logger.debug(`[Store/Data] 現在のプロンプト状態をファイル「${state.selectedFile}」へ保存する処理を開始します。`);
     const res = await fetch("/psm/save-prompts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -579,9 +590,9 @@ export const savePrompts = async () => {
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    Logger.debug("Prompts saved successfully.");
+    Logger.debug("[Store/Data] プロンプトデータをファイルへ正常に書き込みました。");
   } catch (e) {
-    Logger.error("Failed to save prompts:", e);
+    Logger.error("[Store/Data] プロンプトデータのファイル保存に失敗しました。", e);
   } finally {
     stopLoading();
   }
@@ -691,7 +702,7 @@ export const loadSettingsLocal = () => {
       if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
       if (data.show_weight_slider !== undefined) state.showWeightSlider = data.show_weight_slider;
     } catch (e) {
-      Logger.error("Failed to load local settings", e);
+      Logger.error("[Store/Settings] ローカル設定（LocalStorage）の読み込みに失敗しました。", e);
     }
   }
 };
@@ -727,9 +738,9 @@ export const loadConfig = async () => {
     
     // LocalStorageからも読み込む
     loadSettingsLocal();
-    Logger.info(`Config loaded. configured=${state.isConfigured}, dev=${state.isDevMode}`);
+    Logger.info(`[Store/Config] サーバーからグローバル設定を読み込みました。(セットアップ完了状況: ${state.isConfigured}, デバッグモード: ${state.isDevMode})`);
   } catch (e) {
-    Logger.error("Failed to load global config:", e);
+    Logger.error("[Store/Config] サーバーからのグローバル設定読み込みに失敗しました。", e);
   }
 };
 
@@ -759,9 +770,9 @@ export const saveConfig = async (dir: string) => {
     setDebugMode(state.isDevMode);
     await loadConfig();
     await listFiles(); // 新しいディレクトリの内容を反映
-    Logger.info("Config saved and file list refreshed.");
+    Logger.info("[Store/Config] 新しい設定をサーバーへ保存し、YAMLファイル一覧を再読み込みしました。");
   } catch (e) {
-    Logger.error("Failed to save config:", e);
+    Logger.error("[Store/Config] サーバーへの設定保存に失敗しました。", e);
   }
 };
 
@@ -792,7 +803,7 @@ export const pickDirectory = async () => {
       // listFiles is strictly called within saveConfig now
     }
   } catch (e) {
-    Logger.error("Failed to pick directory:", e);
+    Logger.error("[Store/Config] フォルダ選択ダイアログの起動、またはパスの取得に失敗しました。", e);
   }
 };
 

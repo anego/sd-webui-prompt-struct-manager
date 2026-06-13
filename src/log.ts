@@ -11,7 +11,7 @@ export const setDebugMode = (enabled: boolean) => {
 
 export const Logger = {
   info: (msg: string, ...args: unknown[]) => {
-    console.log(`[PSM] ${msg}`, ...args);
+    console.info(`[PSM] ${msg}`, ...args);
   },
 
   warn: (msg: string, ...args: unknown[]) => {
@@ -24,7 +24,7 @@ export const Logger = {
 
   debug: (msg: string, ...args: unknown[]) => {
     if (isDebugMode) {
-      console.log(`[PSM] [Debug] ${msg}`, ...args);
+      console.debug(`[PSM] [Debug] ${msg}`, ...args);
     }
   }
 };

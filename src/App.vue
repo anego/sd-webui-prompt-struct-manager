@@ -39,6 +39,11 @@ const { t } = useI18n();
 
 const buildTimestamp = __BUILD_TIMESTAMP__;
 
+const getWebUiRoot = (): Document | ShadowRoot => {
+  const gradioApp = document.querySelector("gradio-app");
+  return gradioApp?.shadowRoot || document;
+};
+
 // ダイアログの表示状態管理
 const dialogs = ref({
   new: false,
@@ -64,7 +69,7 @@ const handleSaveProfile = async () => {
 };
 
 const handleProfileSelect = async (name: string) => {
-  console.warn(`[PSM App Debug] handleProfileSelect triggered with name: ${name}`);
+  console.info(`[PSM] ユーザーによってプロファイル「${name}」が選択されたため、ツリー状態の適用を開始します。`);
   if (name) {
     await applyProfile(name);
   }
@@ -122,12 +127,11 @@ provide("psm-context-menu", openContextMenu);
 const handleApply = () => {
   const posStr = getCompiledPrompts(state.positive);
   const negStr = getCompiledPrompts(state.negative);
-  const prefix =
-    document.getElementById("img2img_generate")?.offsetParent !== null
-      ? "img2img"
-      : "txt2img";
+  const root = getWebUiRoot();
+  const img2imgGen = root.getElementById("img2img_generate");
+  const prefix = img2imgGen && img2imgGen.offsetParent !== null ? "img2img" : "txt2img";
   const updateTextarea = (selector: string, text: string) => {
-    const ta = document.querySelector(selector)?.querySelector("textarea");
+    const ta = root.querySelector(selector)?.querySelector("textarea");
     if (ta) {
       // React等のフレームワークがstate更新を検知できるようにフォーカスを当てる
       // 画面スクロールを防ぐため preventScroll: true を指定
@@ -206,11 +210,10 @@ const executeGenerate = async () => {
     // GUIの更新を待つために少し待機 (GradIOの反映待ち)
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    const prefix =
-      document.getElementById("img2img_generate")?.offsetParent !== null
-        ? "img2img"
-        : "txt2img";
-    const generateBtn = document.getElementById(`${prefix}_generate`);
+    const root = getWebUiRoot();
+    const img2imgGen = root.getElementById("img2img_generate");
+    const prefix = img2imgGen && img2imgGen.offsetParent !== null ? "img2img" : "txt2img";
+    const generateBtn = root.getElementById(`${prefix}_generate`);
     if (generateBtn) {
       generateBtn.click();
       // スクロール処理は削除
@@ -271,8 +274,67 @@ const { handleGlobalKeydown: handleNavKeydown } = useKeyboardNav({
   onContextMenu: handleKeyboardContextMenu
 });
 
+/**
+ * 大辞典の「挿入」アクションを検知し、PSMの編集欄へ割り込み入力するイベントハンドラ
+ * (キャプチャフェーズで検知して伝播を停止させる)
+ */
+const handleDictionaryInsertIntercept = (event: MouseEvent) => {
+  // モーダルが展開中、かつグループではなくプロンプトを編集中のときのみインターセプト
+  if (!state.isEditing || !state.editingItem || state.editingItem.is_group) {
+    return;
+  }
+
+  const path = event.composedPath();
+  let insertButton: HTMLElement | null = null;
+  for (const el of path) {
+    if (el instanceof HTMLElement && el.hasAttribute("data-pd-insert")) {
+      insertButton = el;
+      break;
+    }
+  }
+
+  if (insertButton) {
+    // 本来の動作（WebUIプロンプト欄への挿入）を防止
+    event.stopPropagation();
+    event.preventDefault();
+
+    const tag = insertButton.dataset.pdInsert || "";
+    if (tag) {
+      let current = state.editingItem.content || "";
+      current = current.trim();
+      if (current) {
+        if (!current.endsWith(",")) {
+          current += ", ";
+        } else {
+          current += " ";
+        }
+      }
+      state.editingItem.content = current + tag;
+
+      // パネルのステータス表示を更新
+      const panel = insertButton.closest(".pd-inline-panel");
+      if (panel) {
+        const statusEl = panel.querySelector(".pd-inline-status");
+        if (statusEl) {
+          statusEl.textContent = "PSMに挿入しました";
+        }
+
+        // 大辞典の検索欄の入力内容をプロンプト名にコピー（名前が未設定の場合のみ）
+        const queryInput = panel.querySelector(".pd-inline-query") as HTMLInputElement | null;
+        if (queryInput && queryInput.value) {
+          const queryVal = queryInput.value.trim();
+          if (queryVal && (!state.editingItem.name || state.editingItem.name.trim() === "")) {
+            state.editingItem.name = queryVal;
+          }
+        }
+      }
+    }
+  }
+};
+
 onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
+  window.addEventListener("click", handleDictionaryInsertIntercept, true);
   await loadConfig();
   if (state.isConfigured) {
     await listFiles();
@@ -290,9 +352,10 @@ watch(
   }
 );
 
-onUnmounted(() =>
-  window.removeEventListener("keydown", handleGlobalKeydown, true),
-);
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown, true);
+  window.removeEventListener("click", handleDictionaryInsertIntercept, true);
+});
 
 const matchShortcut = (e: KeyboardEvent, shortcut: string) => {
   if (!shortcut) return false;
@@ -328,6 +391,21 @@ const matchShortcut = (e: KeyboardEvent, shortcut: string) => {
 };
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
+  // 入力欄（input, textarea, contenteditable）での入力を邪魔しないためのガード
+  const target = e.target as HTMLElement | null;
+  const isInput = target && (
+    target.tagName === "INPUT" || 
+    target.tagName === "TEXTAREA" || 
+    target.isContentEditable
+  );
+
+  // 入力中の場合、修飾キー（Ctrl, Alt, Meta）を伴わない単体キー（例: "M"）によるショートカットはスルーする
+  // ※ただし、Escape や Enter は入力欄でも有効に動作させたいため、これらは除く
+  const hasModifier = e.ctrlKey || e.altKey || e.metaKey;
+  if (isInput && !hasModifier && e.key !== "Escape" && e.key !== "Enter") {
+    return;
+  }
+
   // Configurable Toggle Shortcut
   if (state.toggleShortcut && matchShortcut(e, state.toggleShortcut)) {
     e.preventDefault();

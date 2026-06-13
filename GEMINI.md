@@ -10,3 +10,5 @@
   => 必須読込: `.agent/rules/python-backend.md`
 - **テストコードを書く場合**:
   => 必須読込: `.agent/rules/testing.md`
+- **`.vue` および `.ts` および `.d.ts` を編集する場合**
+  => 必須読込: `.agent\rules\javascript-log.md`

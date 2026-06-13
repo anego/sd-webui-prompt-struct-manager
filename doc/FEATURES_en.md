@@ -33,6 +33,14 @@
 - **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
 - **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks.
 
+### 1.6 Prompt Dictionary Dual-way Integration
+- **Portal Teleportation:** Upon opening the prompt editing modal, the DOM element of the "Prompt Dictionary on SDwebUI" extension is immediately detected and teleported (appendChild) into the modal's portal placeholder without any lag.
+- **Click Interception & Tag Insertion:** While editing, clicking the dictionary's "Insert" button will safely append the selected tags as comma-separated values into the PSM modal's text area instead of pasting them into the main WebUI prompt fields.
+- **Two-Column Layout with Independent Scroll:** When the dictionary integration is active, the modal width automatically expands to `1100px` (2 columns: PSM Edit form on the left, Dictionary search on the right). The dictionary area has independent vertical scrolling, preventing the modal action buttons (Save/Cancel/Delete) from being hidden at the bottom.
+- **Clean Restoration:** When the editing modal is closed, the dictionary panel is seamlessly teleported back to its original parent (`txt2img_actions_column`, etc.) and automatically collapsed.
+- **Search Keyword Auto-Copy:** When tags are inserted, the text currently entered in the dictionary's search input field (`input.pd-inline-query`) is automatically copied to the editing prompt's name field (only works if the name field is currently empty, protecting existing inputs).
+- **Graceful Fallback:** If the dictionary extension is not installed (or not found in the DOM), the modal falls back to a clean 1-column layout (width `600px`), and the portal section is hidden (`display: none`). No JS errors or console warnings will occur.
+
 ## 2. User Interface (UI/UX)
 
 ### 2.1 Group Map
@@ -61,6 +69,11 @@
 - **Double-click Edit:** Quickly open the edit mode (modal) by double-clicking on a group or prompt item.
 - **Context Menu:** Right-clicking on an item opens a context menu for advanced operations (Duplicate, Delete, Move, etc.).
 
+### 2.6 Search Filter
+- **Pane-Independent Filter:** The shared global search filter in the sidebar has been removed, and independent search filters have been added inside the Positive and Negative pane headers.
+- **Pane Collapse Linkage:** The search input field automatically hides when the corresponding pane is clicked and collapsed.
+- **Accidental Trigger Prevention:** Event propagation (bubbling) is prevented for clicks and key inputs inside the filter field, ensuring that typing inside the field does not toggle the pane's open/collapsed state.
+
 ## 3. File, Settings & Profiles Management
 
 ### 3.1 YAML Persistence
@@ -79,6 +92,11 @@
 - **Language:** Switch between Japanese / English.
 - **Save Location (Storage):** Change the YAML file save directory at the bottom of the sidebar.
 - **File List Refresh:** Reload the file structure via the refresh button.
+
+### 3.4 Asynchronous Loading Indicator
+- **Loading Overlay:** Displays a full-screen, pointer-blocking loading overlay (`v-overlay`) during asynchronous operations with the server API (loading/saving/duplicating/renaming/deleting YAML files).
+- **Operation Interlock:** Blocks all mouse and keyboard interactions during loading to prevent data corruption and race conditions caused by double clicks or concurrent updates.
+- **Reactive Progress Text:** Displays a central spinner (`v-progress-circular`) alongside localized messages such as "Loading..." or "Saving..." depending on the active operation.
 
 ## 4. Developer Features (Dev Mode)
 - **Debug Log:** Detailed debug info is output to the console only in Dev Mode via `src/log.ts`.

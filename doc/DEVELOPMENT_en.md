@@ -49,7 +49,7 @@ To ensure quality and reliability, this project utilizes a 3-layered automated t
 ### 4.1 Frontend Unit Tests (Vitest)
 Tests frontend store logic (`store.ts`), state management, duplicate detection, exclusive selection, and profile snapshots.
 - **Test file:** `tests/store_prompt.spec.ts`
-- **Total Tests:** 20 passed
+- **Total Tests:** 22 passed
 - **Command:**
   ```bash
   npm run test:unit
@@ -67,7 +67,7 @@ Tests Python API endpoints, configuration file I/O, and YAML storage schemas.
 ### 4.3 E2E Tests (Playwright)
 Simulates user interaction in a real browser to verify the Setup Wizard, drag & drop, keyboard shortcuts, weight sliders, and profile UI states.
 - **Test file:** `tests/design.spec.ts` etc.
-- **Total Tests:** 6 passed
+- **Total Tests:** 9 passed
 - **Command:**
   ```bash
   # Ensure the WebUI server is running locally (default: http://localhost:7860)

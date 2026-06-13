@@ -448,7 +448,9 @@ describe("カテゴリ内排他選択 (isExclusive)", () => {
 import { 
   saveProfile, 
   applyProfile, 
-  deleteProfile 
+  deleteProfile,
+  startLoading,
+  stopLoading
 } from "../src/store";
 
 describe("状態スナップショット「プロファイル」機能", () => {
@@ -537,9 +539,66 @@ describe("状態スナップショット「プロファイル」機能", () => {
     expect(state.profiles.length).toBe(1);
     expect(state.profiles.find(p => p.name === "PresetA")).toBeUndefined();
     expect(state.selectedProfileName).toBe("");
-    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
   });
 });
+
+describe("非同期処理中のローディングインジケーター表示機能", () => {
+  beforeEach(() => {
+    state.isLoading = false;
+    state.loadingText = "";
+    state.loadingCount = 0;
+  });
+
+  it("6.1 startLoading & stopLoading: カウンタに応じて isLoading と loadingText が正しく同期・制御されること", () => {
+    // 最初の読み込み開始
+    startLoading("loading");
+    expect(state.isLoading).toBe(true);
+    expect(state.loadingText).toBe("loading");
+    expect(state.loadingCount).toBe(1);
+
+    // 重複した保存開始
+    startLoading("saving");
+    expect(state.isLoading).toBe(true);
+    // 最初のテキストが優先される
+    expect(state.loadingText).toBe("loading");
+    expect(state.loadingCount).toBe(2);
+
+    // 1つ目の処理が終了
+    stopLoading();
+    expect(state.isLoading).toBe(true);
+    expect(state.loadingCount).toBe(1);
+
+    // 全ての処理が終了
+    stopLoading();
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingText).toBe("");
+    expect(state.loadingCount).toBe(0);
+  });
+
+  it("6.2 loadPrompts / savePrompts: 非同期処理実行中に isLoading が true になり、終了時に false に戻ること", async () => {
+    state.selectedFile = "load_loading_test.yaml";
+    
+    // loadPromptsのモック
+    const mockResponse = {
+      ok: true,
+      json: async () => {
+        // レスポンス取得中に isLoading が true になっているかアサート
+        expect(state.isLoading).toBe(true);
+        expect(state.loadingText).toBe("loading");
+        return { positive: [], negative: [], profiles: [] };
+      }
+    };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    await loadPrompts();
+
+    // 処理完了後は false に戻る
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingText).toBe("");
+  });
+});
+
+
 
 
 

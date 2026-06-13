@@ -3,7 +3,7 @@
  * ツリーノードコンポーネント (再帰的)
  * グループまたはプロンプトアイテムを表示し、ドラッグ&ドロップやコンテキストメニュー操作を提供します。
  */
-import { computed, inject } from "vue";
+import { computed, inject, ref, Ref } from "vue";
 import draggable from "vuedraggable";
 import {
   state,
@@ -31,14 +31,15 @@ const props = defineProps<{
   parentGroup?: PsmItem;
 }>();
 const openContextMenu = inject<Function>("psm-context-menu");
+const searchQuery = inject<Ref<string>>("search-query", ref(""));
 
 /**
  * 検索クエリに基づいて表示可否を決定する
  * 自分自身または子孫のいずれかが一致すれば表示される (フィルタリング)
  */
 const isVisible = computed(() => {
-  if (!state.searchQuery) return true;
-  const q = state.searchQuery.toLowerCase();
+  if (!searchQuery.value) return true;
+  const q = searchQuery.value.toLowerCase();
   // Safe match function handling null/undefined
   const match = (s: string | undefined | null) => {
     if (!s) return false;
@@ -86,7 +87,7 @@ const isEffectiveEnabled = computed(() => {
 // Auto-expand on search match
 import { watch } from "vue";
 watch(
-  () => [isVisible.value, state.searchQuery],
+  () => [isVisible.value, searchQuery.value],
   ([visible, query]) => {
     if (visible && query && props.item.is_group && !props.item.isOpen) {
       props.item.isOpen = true;
@@ -487,6 +488,7 @@ const moveSelf = (dir: 'up' | 'down') => {
         size="small"
         class="ma-0"
         :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
+        :title="t('doubleClickToEdit')"
         @click.stop="handleClickLeaf"
         @dblclick.stop="startEdit(item)"
         @contextmenu.prevent.stop="
@@ -520,11 +522,12 @@ const moveSelf = (dir: 'up' | 'down') => {
         <v-icon
           end
           :size="iconSize"
-          class="ml-2 opacity-50 psm-node__hover-opacity"
+          class="ml-2 psm-node__hover-opacity"
           @click.stop="startEdit(item)"
           data-testid="edit-item-btn"
+          :title="t('edit')"
         >
-          mdi-cog
+          mdi-pencil
         </v-icon>
       </v-chip>
 
@@ -577,10 +580,17 @@ const moveSelf = (dir: 'up' | 'down') => {
 
 div.psm-node {
   i.psm-node__hover-opacity {
-    transition: opacity 0.2s;
+    opacity: 0.6 !important; /* デフォルトで常時表示して見落としを防ぐ */
+    transition: all 0.2s;
     &:hover {
-      opacity: 1;
+      opacity: 1 !important;
+      color: #ff5722 !important; /* テーマのオレンジカラー */
     }
+  }
+
+  /* チップにホバーした時に中の鉛筆アイコンをさらに際立たせる */
+  .v-chip:hover .psm-node__hover-opacity {
+    opacity: 1 !important;
   }
 
   i.psm-node__hover-scale {

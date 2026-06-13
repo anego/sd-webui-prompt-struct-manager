@@ -16,7 +16,7 @@ const pickDirLocal = async () => {
             state.configDir = data.path;
         }
     } catch (e) {
-        console.error("Failed to pick dir", e);
+        console.error("[PSM][SetupWizard/Config] セットアップウィザードでの保存ディレクトリ選択ダイアログの起動、またはパス取得に失敗しました。", { error: e });
     }
 };
 
@@ -38,7 +38,7 @@ const handleFinish = async () => {
         
         // Explicitly set configured if somehow logic drifted, but saveConfig does it.
     } catch (e) {
-        console.error("Setup failed", e);
+        console.error("[PSM][SetupWizard/Confirm] セットアップの確定処理（設定の保存、または初期ファイルの作成）に失敗しました。", { error: e });
         alert("Setup failed: " + e);
     } finally {
         isLoading.value = false;

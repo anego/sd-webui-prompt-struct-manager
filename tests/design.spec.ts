@@ -217,25 +217,31 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
 
     // Act & Assert (重複の作成およびトリガー)
     // ラジオボタンの "Show Warning" をクリックして重複検出をONにする
-    const warnRadio = page.getByTestId("controls-bar").getByText("Show Warning");
-    await warnRadio.click();
+    const warnRadio = page.locator("input[type='radio'][value='warn']");
+    await warnRadio.check({ force: true });
     await page.waitForTimeout(300);
+
+    const loadingOverlay = page.getByTestId("loading-overlay");
 
     // 1つ目の Prompt を追加
     await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
     await page.getByTestId("edit-content-input").locator("textarea").first().fill(duplicateText);
     await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
     await page.getByTestId("edit-name-input").locator("input").fill(`PromptA_${uniq}`);
     await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
     await page.getByTestId("edit-save-btn").click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
 
     // 2つ目の同一内容 Prompt を追加 (重複発生)
     await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
     await page.getByTestId("edit-content-input").locator("textarea").first().fill(duplicateText);
     await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
     await page.getByTestId("edit-name-input").locator("input").fill(`PromptB_${uniq}`);
     await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
     await page.getByTestId("edit-save-btn").click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
 
     const chipA = page.locator(".v-chip", { hasText: `PromptA_${uniq}` }).first();
     const chipB = page.locator(".v-chip", { hasText: `PromptB_${uniq}` }).first();
@@ -249,7 +255,7 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     await applyBtn.click({ force: true });
 
     // 重複警告モーダル（PsmDuplicateConfirmDialog）が表示されるのを待つ
-    const dupModal = page.locator(".v-card", { hasText: /duplicate/i }).first();
+    const dupModal = page.getByTestId("duplicate-confirm-dialog");
     await dupModal.waitFor({ state: "visible", timeout: 10000 });
 
     // Assert (重複警告スタイルの検証)
@@ -263,7 +269,7 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
 
     // Act (クリーンアップとしてダイアログを閉じる)
     // 重複警告モーダルをキャンセル（閉じる）して元のツリー表示に戻す
-    const cancelBtn = dupModal.locator("button", { hasText: /cancel/i }).first();
+    const cancelBtn = page.getByTestId("duplicate-cancel-btn");
     await cancelBtn.click({ force: true });
     await dupModal.waitFor({ state: "hidden", timeout: 5000 });
   });
@@ -498,6 +504,399 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     // Assert 4: プロファイル選択状態が解除されたこと
     const selection = select.locator(".v-select__selection");
     await expect(selection).not.toBeVisible();
+  });
+
+  test("7. Normal key input (typing in edit fields) should not trigger global shortcuts or close PSM panel", async ({ page }) => {
+    const promptName = `TypingTest_${uniq}`;
+    const loadingOverlay = page.getByTestId("loading-overlay");
+
+    // モーダルを起動
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+
+    // 名前入力フィールドを取得して通常文字・Enter・矢印などを入力
+    const nameInput = page.getByTestId("edit-name-input").locator("input");
+    await nameInput.click();
+    
+    // a-z, 0-9, Enter, Space, Arrow keys, Backspace, Escape などの各種通常キーを入力する
+    await nameInput.press("a");
+    await nameInput.press("b");
+    await nameInput.press("c");
+    await nameInput.press("1");
+    await nameInput.press("2");
+    await nameInput.press("Space");
+    await nameInput.press("ArrowLeft");
+    await nameInput.press("ArrowRight");
+    await nameInput.press("Backspace");
+    await nameInput.press("Enter"); // text-fieldの中でのEnter (非修飾)
+
+    // 内容入力フィールド（textarea）に移動して同様にテスト
+    const textarea = page.getByTestId("edit-content-input").locator("textarea").first();
+    await textarea.click();
+    await textarea.press("m"); // m キー (不具合のあったキー)
+    await textarea.press("e");
+    await textarea.press("n");
+    await textarea.press("t");
+    await textarea.press("Enter"); // textareaの中でのEnter (改行)
+    await textarea.press("ArrowUp");
+
+    // アサーション 1: PSMパネル本体および編集モーダルが閉じずに表示されたままであること
+    await expect(page.locator("#psm_app_root_container")).toBeVisible();
+    await expect(page.getByTestId("edit-modal")).toBeVisible();
+
+    // 入力した内容が維持されていることを確認
+    const finalName = await nameInput.inputValue();
+    const finalContent = await textarea.inputValue();
+    expect(finalName).toContain("abc1"); // Backspaceや矢印などによる変化はあるが、基本文字が含まれる
+    expect(finalContent).toContain("m");
+    expect(finalContent).toContain("ent");
+
+    // 保存ショートカット Ctrl+Enter で保存を確定
+    await textarea.press("Control+Enter");
+    await page.getByTestId("edit-modal").waitFor({ state: "hidden", timeout: 10000 });
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // アサーション 2: PSMパネル本体は開いたままであること
+    await expect(page.locator("#psm_app_root_container")).toBeVisible();
+  });
+
+  test("8. Prompt deletion confirmation should not close the main PSM panel", async ({ page }) => {
+    const promptName = `DelSafety_${uniq}`;
+    const loadingOverlay = page.getByTestId("loading-overlay");
+
+    // 1. テスト用のプロンプトを追加して保存
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("tagToDelete");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(promptName);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    const chip = page.locator(".v-chip", { hasText: promptName }).first();
+    await expect(chip).toBeVisible();
+
+    // 2. 追加したプロンプトの編集モーダルを開く
+    // test-id で編集ボタンを狙い撃つ
+    await chip.getByTestId("edit-item-btn").click({ force: true });
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+
+    // 3. モーダルフッターの「削除」ボタンをクリック
+    const deleteBtn = page.getByTestId("footer-delete-btn");
+    await deleteBtn.waitFor({ state: "visible", timeout: 5000 });
+    await deleteBtn.click();
+
+    // 4. 削除確認ダイアログの「削除」ボタンをクリック
+    const confirmDialog = page.getByTestId("delete-confirm-modal");
+    await expect(confirmDialog).toBeVisible();
+    
+    // ダイアログ内の「削除」ボタンをクリックして確定
+    const confirmDeleteBtn = confirmDialog.getByTestId("confirm-delete-btn");
+    await confirmDeleteBtn.click();
+
+    // 削除処理とダイアログの消滅を待つ
+    await confirmDialog.waitFor({ state: "hidden", timeout: 10000 });
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // アサーション: 
+    // - プロンプトがツリーから削除されていること
+    // - 編集モーダルが閉じていること
+    // - PSMパネル本体は開いた状態を維持していること
+    await expect(chip).not.toBeVisible();
+    await expect(page.getByTestId("edit-modal")).not.toBeVisible();
+    await expect(page.locator("#psm_app_root_container")).toBeVisible();
+  });
+
+  test("9. Prompt Dictionary integration (portal move, tag insert and restore) should work properly", async ({ page }) => {
+    // 1. WebUI 側にモックの「プロンプト大辞典」パネルと挿入ボタンを用意する。
+    await page.evaluate(() => {
+      const gradioApp = document.querySelector("gradio-app");
+      const root = gradioApp?.shadowRoot || document.body;
+
+      // 既存のモックがあれば一旦削除
+      const existing = root.querySelector("#pd_inline_panel_txt2img");
+      if (existing) existing.remove();
+
+      // 大辞典親コンテナの作成
+      const parent = document.createElement("div");
+      parent.id = "mock_dict_parent";
+
+      const panel = document.createElement("div");
+      panel.id = "pd_inline_panel_txt2img";
+      panel.style.padding = "10px";
+      panel.style.background = "#222";
+      
+      const head = document.createElement("div");
+      head.className = "pd-inline-head";
+      head.setAttribute("aria-expanded", "false");
+      // aria-expandedトグルのためのクリックリスナー
+      head.addEventListener("click", () => {
+        const expanded = head.getAttribute("aria-expanded") === "true";
+        head.setAttribute("aria-expanded", !expanded ? "true" : "false");
+      });
+      panel.appendChild(head);
+
+      const btn = document.createElement("button");
+      btn.id = "mock_insert_btn";
+      btn.setAttribute("data-pd-insert", "masterpiece");
+      btn.innerText = "Insert Tag";
+      panel.appendChild(btn);
+
+      const sibling = document.createElement("div");
+      sibling.id = "mock_dict_sibling";
+
+      parent.appendChild(panel);
+      parent.appendChild(sibling);
+      root.appendChild(parent);
+    });
+
+    const loadingOverlay = page.getByTestId("loading-overlay");
+
+    // 2. モーダルを起動
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+
+    // 3. アサーション 1: 大辞典パネルがポータルに移動され、2カラム表示になっていること
+    const portal = page.locator("#psm_dictionary_portal");
+    await expect(portal).toBeVisible();
+
+    const panelInPortal = portal.locator("#pd_inline_panel_txt2img");
+    await expect(panelInPortal).toBeVisible();
+
+    // 4. アサーション 2: 大辞典が自動で展開 (aria-expanded = true) になっていること
+    const head = panelInPortal.locator(".pd-inline-head");
+    await expect(head).toHaveAttribute("aria-expanded", "true");
+
+    // 5. アサーション 3: 挿入クリック時に、編集モーダルの textarea にタグが挿入されること
+    const textarea = page.getByTestId("edit-content-input").locator("textarea").first();
+    const insertBtn = panelInPortal.locator("#mock_insert_btn");
+    await insertBtn.click();
+
+    await expect(textarea).toHaveValue("masterpiece");
+
+    // もう一度クリックして、カンマ区切りで追加されるか検証
+    await insertBtn.click();
+    await expect(textarea).toHaveValue("masterpiece, masterpiece");
+
+    // 6. 完了して閉じる
+    await textarea.press("Control+Enter");
+    await page.getByTestId("edit-modal").waitFor({ state: "hidden", timeout: 10000 });
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
+
+    // 7. アサーション 4: 大辞典パネルが元の位置に復元されていること
+    // デバッグ用のDOM状態出力
+    const domStatus = await page.evaluate(() => {
+      const gradioApp = document.querySelector("gradio-app");
+      const root = gradioApp?.shadowRoot || document.body;
+      const panel = root.querySelector("#pd_inline_panel_txt2img");
+      const parent = root.querySelector("#mock_dict_parent");
+      const portal = root.querySelector("#psm_dictionary_portal");
+      return {
+        panelExists: !!panel,
+        panelParentId: panel?.parentElement?.id || panel?.parentElement?.tagName || "null",
+        parentExists: !!parent,
+        parentChildrenIds: parent ? Array.from(parent.children).map(c => c.id) : [],
+        portalExists: !!portal,
+        portalChildrenIds: portal ? Array.from(portal.children).map(c => c.id) : []
+      };
+    });
+    console.log("DOM STATUS AFTER CLOSE:", domStatus);
+
+    // 7. アサーション 4: 大辞典パネルが元の位置に復元されていること
+    // 本物の大辞典の自動回収により元の親(txt2img_actions_column)に戻っている場合も含めてアサート
+    await page.waitForFunction(() => {
+      const gradioApp = document.querySelector("gradio-app");
+      const root = gradioApp?.shadowRoot || document.body;
+      const panel = root.querySelector("#pd_inline_panel_txt2img");
+      const parentId = panel?.parentElement?.id;
+      return parentId === "mock_dict_parent" || parentId === "txt2img_actions_column";
+    }, { timeout: 10000 });
+
+    // 8. アサーション 5: 復元時、大辞典パネルが自動で折りたたまれている (aria-expanded = false) こと
+    await page.waitForFunction(() => {
+      const gradioApp = document.querySelector("gradio-app");
+      const root = gradioApp?.shadowRoot || document.body;
+      const head = root.querySelector("#pd_inline_panel_txt2img .pd-inline-head");
+      return head ? head.getAttribute("aria-expanded") === "false" : false;
+    }, { timeout: 5000 });
+  });
+
+  test("10. Pane-Header independent filters should work properly", async ({ page }) => {
+    // 1. 旧サイドバー検索欄がないことを検証
+    const sidebarSearch = page.locator(".psm-sidebar .psm-pane__search-input");
+    await expect(sidebarSearch).not.toBeVisible();
+
+    // 2. Positive / Negative ペインとそれぞれの検索欄を取得
+    const positivePane = page.locator(".psm-pane").filter({ hasText: /Positive/i }).first();
+    const negativePane = page.locator(".psm-pane").filter({ hasText: /Negative/i }).first();
+
+    // Negative ペインが閉じている（縦型プレースホルダーが表示されている）場合は開く
+    const negativePlaceholder = negativePane.locator(".psm-pane__placeholder--hoverable").first();
+    if (await negativePlaceholder.isVisible()) {
+      await negativePlaceholder.click();
+    }
+
+    const positiveSearch = positivePane.locator(".psm-pane__search-input input");
+    const negativeSearch = negativePane.locator(".psm-pane__search-input input");
+
+    await expect(positiveSearch).toBeVisible();
+    await expect(negativeSearch).toBeVisible();
+
+    const promptNamePos = `FilterPos_${uniq}`;
+    const promptNameNeg = `FilterNeg_${uniq}`;
+
+    // Positive 側にプロンプトを追加して保存
+    await positivePane.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("pos_content");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(promptNamePos);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    await page.getByTestId("loading-overlay").waitFor({ state: "hidden", timeout: 10000 });
+
+    // Negative 側にプロンプトを追加して保存
+    await negativePane.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill("neg_content");
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(promptNameNeg);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    await page.getByTestId("loading-overlay").waitFor({ state: "hidden", timeout: 10000 });
+
+    // 両方のチップが可視状態であることを確認
+    const chipPos = positivePane.locator(".v-chip", { hasText: promptNamePos }).first();
+    const chipNeg = negativePane.locator(".v-chip", { hasText: promptNameNeg }).first();
+    await expect(chipPos).toBeVisible();
+    await expect(chipNeg).toBeVisible();
+
+    // Positive フィルターに入力
+    await positiveSearch.fill(promptNamePos);
+    await positiveSearch.dispatchEvent("input");
+
+    // Positive 側は絞り込まれ、chipPos は表示
+    await expect(chipPos).toBeVisible();
+    // Negative 側は影響を受けず表示されたまま
+    await expect(chipNeg).toBeVisible();
+
+    // Negative 側に無関係な入力をして、chipNeg が非表示になるか確認
+    await negativeSearch.fill("NonExistentPromptNameXYZ");
+    await negativeSearch.dispatchEvent("input");
+    await expect(chipNeg).not.toBeVisible();
+    // Positive 側は影響を受けない
+    await expect(chipPos).toBeVisible();
+
+    // 4. フィルター入力欄でのクリックがペインの開閉を引き起こさないか検証
+    await positiveSearch.click();
+    // ペインのメインツリー領域が可視のままであること
+    await expect(positivePane.locator(".flex-grow-1.overflow-y-auto")).toBeVisible();
+
+    // 5. ペインを閉じたとき、フィルターが非表示になることを検証
+    const closeBtn = positivePane.locator(".psm-pane__header--hoverable button").first();
+    await closeBtn.click();
+    await expect(positiveSearch).not.toBeVisible();
+
+    // 後片付けとしてペインを再度開く
+    const collapsedPlaceholder = positivePane.locator(".psm-pane__placeholder--hoverable").first();
+    await collapsedPlaceholder.click();
+    await expect(positiveSearch).toBeVisible();
+
+    // フィルターのクエリを元に戻す
+    await positiveSearch.fill("");
+    await positiveSearch.dispatchEvent("input");
+    await negativeSearch.fill("");
+    await negativeSearch.dispatchEvent("input");
+  });
+
+  test("11. Prompt Dictionary insert should automatically copy search query to empty name field", async ({ page }) => {
+    // 1. WebUI 側にモックの「プロンプト大辞典」パネルと挿入ボタン、検索入力欄を用意する。
+    await page.evaluate(() => {
+      const gradioApp = document.querySelector("gradio-app");
+      const root = gradioApp?.shadowRoot || document.body;
+
+      const existing = root.querySelector("#pd_inline_panel_txt2img");
+      if (existing) existing.remove();
+
+      const parent = document.createElement("div");
+      parent.id = "mock_dict_parent";
+
+      const panel = document.createElement("div");
+      panel.id = "pd_inline_panel_txt2img";
+      panel.className = "pd-inline-panel";
+      panel.style.padding = "10px";
+      panel.style.background = "#222";
+      
+      const head = document.createElement("div");
+      head.className = "pd-inline-head";
+      head.setAttribute("aria-expanded", "false");
+      panel.appendChild(head);
+
+      const queryInput = document.createElement("input");
+      queryInput.className = "pd-inline-query";
+      queryInput.type = "text";
+      queryInput.value = "";
+      panel.appendChild(queryInput);
+
+      const btn = document.createElement("button");
+      btn.id = "mock_insert_btn_2";
+      btn.setAttribute("data-pd-insert", "sunflower");
+      btn.innerText = "Insert Tag";
+      panel.appendChild(btn);
+
+      const sibling = document.createElement("div");
+      sibling.id = "mock_dict_sibling";
+
+      parent.appendChild(panel);
+      parent.appendChild(sibling);
+      root.appendChild(parent);
+    });
+
+    const loadingOverlay = page.getByTestId("loading-overlay");
+
+    // 2. モーダルを新規追加で開く (名前は空欄)
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+
+    const nameInput = page.getByTestId("edit-name-input").locator("input");
+    const textarea = page.getByTestId("edit-content-input").locator("textarea").first();
+
+    await expect(nameInput).toHaveValue("");
+
+    // 3. 大辞典の検索欄に "ひまわり" と入力する
+    const portal = page.locator("#psm_dictionary_portal");
+    const dictQueryInput = portal.locator(".pd-inline-query");
+    await dictQueryInput.fill("ひまわり");
+
+    // 4. 「挿入」をクリック
+    const insertBtn = portal.locator("#mock_insert_btn_2");
+    await insertBtn.click();
+
+    // 5. アサーション: 本文に "sunflower" が挿入され、名前欄に "ひまわり" がコピーされること
+    await expect(textarea).toHaveValue("sunflower");
+    await expect(nameInput).toHaveValue("ひまわり");
+
+    // 6. すでに名前がある場合は上書きされないことを検証
+    await nameInput.fill("既存の名前");
+    await nameInput.dispatchEvent("input");
+
+    await dictQueryInput.fill("コスモス");
+    await page.evaluate(() => {
+      const gradioApp = document.querySelector("gradio-app");
+      const root = gradioApp?.shadowRoot || document.body;
+      const btn = root.querySelector("#mock_insert_btn_2");
+      if (btn) btn.setAttribute("data-pd-insert", "cosmos");
+    });
+    await insertBtn.click();
+
+    // アサーション: 本文は追記されるが、名前は上書きされないこと
+    await expect(textarea).toHaveValue("sunflower, cosmos");
+    await expect(nameInput).toHaveValue("既存の名前");
+
+    // 7. 保存して閉じる
+    await page.getByTestId("edit-save-btn").click();
+    await page.getByTestId("edit-modal").waitFor({ state: "hidden", timeout: 10000 });
+    await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
   });
 });
 

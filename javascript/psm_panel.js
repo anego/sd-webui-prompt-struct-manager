@@ -1,4 +1,5 @@
 (function () {
+  console.log("[PSM Debug] psm_panel.js execution started.");
   const getExtensionPath = () => {
     const scripts = document.getElementsByTagName("script");
     for (let i = 0; i < scripts.length; i++) {
@@ -18,8 +19,9 @@
 
   // 1. JSロード
   const script = document.createElement("script");
-  script.src = `${basePath}/dist/index.js`;
+  script.src = `${basePath}/dist/index.js?t=${Date.now()}`;
   script.type = "module";
+  console.log(`[PSM Debug] Dynamic loading main bundle: ${script.src}`);
   script.onerror = () => {
     console.error(
       `[PSM Debug] 404: ${script.src} が見つかりません。ビルドしてください。`,
