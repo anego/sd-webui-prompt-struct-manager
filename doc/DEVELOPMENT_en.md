@@ -81,6 +81,10 @@ Simulates user interaction in a real browser to verify the Setup Wizard, drag & 
 
 ## 5. Debugging
 Filter by `[PSM]` in the browser console to isolate extension logs.
+
+This extension adheres to the browser's standard console log level conventions. Detailed trace logs for development are output using `console.debug()`, standard application milestones using `console.info()`, and errors or warnings using `console.error()` / `console.warn()`.
+As a consequence, the default console view (Info level and above) is kept clean in production. You can inspect detailed trace logs by enabling the "Verbose" or "Debug" log level in your browser's developer tools.
+
 If detailed logs are needed, set `dev_mode` to `true` in the configuration file (`config.json`) or enable developer mode via the UI (if implemented).
 
 ## 6. Styling & CSS Architecture

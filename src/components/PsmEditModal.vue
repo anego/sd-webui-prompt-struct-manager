@@ -94,7 +94,7 @@ const moveDictionaryPanel = async () => {
     panel.setAttribute("data-psm-teleported", "true");
     
     portal.appendChild(panel);
-    console.info(`[PSM][EditModal/Portal] 2カラム表示を構成するため、プロンプト大辞典パネル（アクティブタブ: ${tabname}）を編集モーダル内のポータルへ退避マウントしました。`);
+    console.debug(`[PSM][EditModal/Portal] 2カラム表示を構成するため、プロンプト大辞典パネル（アクティブタブ: ${tabname}）を編集モーダル内のポータルへ退避マウントしました。`);
     
     // 詳細情報をデバッグログとして折りたたんでグループ表示
     console.groupCollapsed(`[PSM][EditModal/Portal] ポータル移動が行われたDOM構造の詳細を展開します。`);
@@ -141,7 +141,7 @@ watch(
       // モーダルが開く前に大辞典の存在を事前検知し、モーダルの初期幅を決定する
       if (checkDictionaryPresence()) {
         state.hasDictionary = true;
-        console.info("[PSM][EditModal/Layout] 編集対象がプロンプトであり、かつ大辞典パネルが存在するため、2カラムレイアウトでモーダルを起動します。");
+        console.debug("[PSM][EditModal/Layout] 編集対象がプロンプトであり、かつ大辞典パネルが存在するため、2カラムレイアウトでモーダルを起動します。");
       } else {
         state.hasDictionary = false;
       }

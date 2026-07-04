@@ -28,7 +28,18 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     page.on("console", msg => {
       if (msg.type() === "error" || msg.type() === "warning") {
-        console.log(`[Browser Console] ${msg.type()}: ${msg.text()}`);
+        const text = msg.text();
+        // 外部リソース（Gradioポーリング、他拡張機能の画像など）や多重定義警告を除外
+        if (
+          text.includes("Failed to load resource") ||
+          text.includes("queue/status") ||
+          text.includes("prompt-history") ||
+          text.includes("already defined") ||
+          text.includes("fabric.")
+        ) {
+          return;
+        }
+        console.log(`[Browser Console] ${msg.type()}: ${text}`);
       }
     });
     page.on("pageerror", err => console.log(`[Browser Error] ${err.stack}`));
@@ -898,6 +909,45 @@ test.describe("PSM Design and CSS Verification Test Suite", () => {
     await page.getByTestId("edit-modal").waitFor({ state: "hidden", timeout: 10000 });
     await loadingOverlay.waitFor({ state: "hidden", timeout: 10000 });
   });
+
+  test("12. Long prompt name or content should not hide the edit icon (flex-shrink-0 protection)", async ({ page }) => {
+    // Arrange
+    const longName = "ThisIsAVeryVeryVeryLongPromptNameThatNormallyTriggersEllipsisAndShouldNotPushOutTheEditButtonIcon";
+    const longContent = "very_long_content_value_that_might_also_be_displayed_or_cause_overflow";
+
+    // Act
+    await page.getByTestId("root-add-prompt").first().click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+    
+    await page.getByTestId("edit-content-input").locator("textarea").first().fill(longContent);
+    await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
+    await page.getByTestId("edit-name-input").locator("input").fill(longName);
+    await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
+    await page.getByTestId("edit-save-btn").click();
+    
+    await page.getByTestId("loading-overlay").waitFor({ state: "hidden", timeout: 10000 });
+
+    // Assert
+    const chip = page.locator(".v-chip", { hasText: longName }).first();
+    await expect(chip).toBeVisible();
+
+    const editBtn = chip.getByTestId("edit-item-btn");
+    await expect(editBtn).toBeVisible();
+    
+    const box = await editBtn.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.height).toBeGreaterThan(0);
+
+    // 実際にクリックして編集モーダルが開くかを確認
+    await editBtn.click();
+    await page.getByTestId("edit-modal").waitFor({ state: "visible", timeout: 5000 });
+
+    // キャンセルして閉じる
+    await page.getByTestId("edit-cancel-btn").click();
+    await page.getByTestId("edit-modal").waitFor({ state: "hidden", timeout: 5000 });
+  });
 });
+
 
 

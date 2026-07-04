@@ -303,6 +303,11 @@ const moveSelf = (dir: 'up' | 'down') => {
       >
         <div class="d-flex mr-2 align-center ga-1">
           <v-icon
+            size="20"
+            class="psm-cursor-grab psm-node__drag-handle"
+            color="grey-lighten-1"
+          >mdi-drag-vertical</v-icon>
+          <v-icon
             size="24"
             :color="parentChildren.indexOf(item) === 0 ? 'grey-darken-3' : 'grey-lighten-1'"
             class="psm-cursor-pointer psm-node__hover-scale"
@@ -412,8 +417,8 @@ const moveSelf = (dir: 'up' | 'down') => {
       
       <!-- Explicit Drop Zone for Closed Groups -->
       <div 
-        v-if="state.isDragging && !item.isOpen"
         class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey"
+        :class="{ 'd-none': !(state.isDragging && !item.isOpen) }"
         @dragenter.stop="handleGroupMouseOver"
         @dragover.prevent
         @drop.stop="handleDropIntoGroup"
@@ -431,8 +436,10 @@ const moveSelf = (dir: 'up' | 'down') => {
           v-model="item.children"
           item-key="id"
           group="psm-tree"
-          handle=".drag-handle"
-          :animation="200"
+          handle=".psm-node__drag-handle"
+          :animation="150"
+          :force-fallback="true"
+          :fallback-tolerance="3"
           class="d-flex flex-wrap align-center ga-1"
           @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = item.children![e.oldIndex!]; }"
           @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
@@ -450,8 +457,8 @@ const moveSelf = (dir: 'up' | 'down') => {
         
         <!-- Explicit Drop Zone for Open Groups -->
         <div 
-          v-if="state.isDragging"
           class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey mb-1"
+          :class="{ 'd-none': !state.isDragging }"
           @dragover.prevent
           @drop.stop="handleDropIntoGroup"
         >
@@ -495,12 +502,12 @@ const moveSelf = (dir: 'up' | 'down') => {
           openContextMenu?.($event, item, parentChildren)
         "
       >
-        <v-icon start :size="iconSize" class="psm-cursor-grab psm-node__drag-handle"
+        <v-icon start :size="iconSize" class="psm-cursor-grab psm-node__drag-handle flex-shrink-0"
           >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
         >
         <span
-          class="text-truncate"
-          style="max-width: 150px"
+          class="text-truncate flex-shrink-1"
+          style="max-width: 110px"
           :class="[
             { 
               'text-decoration-line-through text-disabled': !isEffectiveEnabled,
@@ -515,14 +522,14 @@ const moveSelf = (dir: 'up' | 'down') => {
         <!-- Dynamic Prompt Indicator -->
         <span
           v-if="item.weight !== 1.0"
-          class="ml-1 text-caption text-orange font-weight-bold"
+          class="ml-1 text-caption text-orange font-weight-bold flex-shrink-0"
           >({{ item.weight }})</span
         >
 
         <v-icon
           end
           :size="iconSize"
-          class="ml-2 psm-node__hover-opacity"
+          class="ml-2 psm-node__hover-opacity flex-shrink-0"
           @click.stop="startEdit(item)"
           data-testid="edit-item-btn"
           :title="t('edit')"

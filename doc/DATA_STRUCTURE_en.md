@@ -6,7 +6,7 @@
 Basic unit representing a prompt or a group. Has a recursive structure.
 ```typescript
 export interface PsmItem {
-  id: number;           // Unique identifier (Current Impl: Date.now() + Math.random())
+  id: number;           // Unique identifier (Current Impl: complete integer generated via Date.now() * 1000 + Math.floor(Math.random() * 1000))
   name: string;         // Display name (Group name or Prompt alias)
   content: string;      // Actual prompt string (e.g., "1girl, solo")
   enabled: boolean;     // Enable/Disable flag
@@ -39,13 +39,13 @@ Saved YAML files have the following root structure.
 
 ```yaml
 positive:
-  - id: 1234567890.123
+  - id: 1780190551195
     name: "Character"
     content: ""
     enabled: true
     is_group: true
     children:
-      - id: 1234567890.456
+      - id: 1780190551200
         name: "Main Character"
         content: "1girl, silver hair"
         enabled: true
@@ -53,7 +53,7 @@ positive:
         is_group: false
 
 negative:
-  - id: 9876543210.123
+  - id: 1780190551300
     name: "Low Quality"
     content: "lowres, bad anatomy"
     enabled: true
@@ -62,7 +62,7 @@ negative:
 profiles:
   - name: "MyProfile"
     states:
-      - id: 1234567890.456
+      - id: 1780190551200
         enabled: true
         weight: 1.2
 ```

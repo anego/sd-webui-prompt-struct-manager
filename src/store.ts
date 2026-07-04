@@ -401,7 +401,7 @@ export const saveProfile = async (name: string) => {
  * 保存されている状態スナップショット（プロファイル）をツリー全体に高速適用する
  */
 export const applyProfile = async (name: string) => {
-  console.info(`[PSM][Store/Profile] プロファイル「${name}」の適用処理を開始します。`);
+  console.debug(`[PSM][Store/Profile] プロファイル「${name}」の適用処理を開始します。`);
   const profile = state.profiles.find(p => p.name === name);
   if (!profile) {
     console.warn(`[PSM][Store/Profile] 指定されたプロファイル「${name}」が見つかりませんでした。適用をスキップします。`);
@@ -438,7 +438,7 @@ export const applyProfile = async (name: string) => {
   walk(state.positive);
   walk(state.negative);
   
-  console.info(`[PSM][Store/Profile] プロファイル「${name}」の適用が完了しました。（適用ノード数: ${appliedCount} 件）`);
+  console.debug(`[PSM][Store/Profile] プロファイル「${name}」の適用が完了しました。（適用ノード数: ${appliedCount} 件）`);
   
   state.selectedProfileName = name;
   await savePrompts();
@@ -576,7 +576,6 @@ export const loadPrompts = async () => {
  */
 export const savePrompts = async () => {
   if (!state.selectedFile) return;
-  startLoading("saving");
   try {
     Logger.debug(`[Store/Data] 現在のプロンプト状態をファイル「${state.selectedFile}」へ保存する処理を開始します。`);
     const res = await fetch("/psm/save-prompts", {
@@ -593,8 +592,6 @@ export const savePrompts = async () => {
     Logger.debug("[Store/Data] プロンプトデータをファイルへ正常に書き込みました。");
   } catch (e) {
     Logger.error("[Store/Data] プロンプトデータのファイル保存に失敗しました。", e);
-  } finally {
-    stopLoading();
   }
 };
 
@@ -874,8 +871,16 @@ export const getCompiledPrompts = (nodes: PsmItem[], separator = ", "): string =
         }
       } else {
         // アイテム
+        let content = n.content;
+
+        // ワイルドカード（__wildcard__）はアンダーバーを置換しない
+        const isWildcard = /^__.+__$/.test(content.trim());
+        if (!isWildcard) {
+          content = content.replace(/_/g, " ");
+        }
+
         // コンテンツ内の () をエスケープする
-        let content = n.content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+        content = content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
         
         // 末尾のカンマや空白を除去 (例: "foo, " -> "foo")
         content = content.replace(/,\s*$/, "").trim();

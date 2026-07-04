@@ -142,6 +142,22 @@ describe("getCompiledPrompts - プロンプト階層コンパイル", () => {
     // 括弧が \( \) にエスケープされ、末尾カンマが消え、重み付けが正しく適用されていること
     expect(result).toBe("smile \\(showing teeth\\), sparkles, (holding flower:1.1)");
   });
+
+  it("1.6 プロンプト内のアンダーバーが半角スペースに自動置換され、かつワイルドカードは保護されること", () => {
+    // Arrange
+    const nodes: PsmItem[] = [
+      { id: 1, name: "p1", content: "sway_back", enabled: true, weight: 1.0, is_group: false },
+      { id: 2, name: "p2", content: "__character__", enabled: true, weight: 1.0, is_group: false }, // ワイルドカード
+      { id: 3, name: "p3", content: "camel_case_name", enabled: true, weight: 1.1, is_group: false }, // 重み付き
+    ];
+
+    // Act
+    const result = getCompiledPrompts(nodes);
+
+    // Assert
+    // sway_back が sway back、camel_case_name が camel case name（重み付き）になり、__character__ はそのまま維持されること
+    expect(result).toBe("sway back, __character__, (camel case name:1.1)");
+  });
 });
 
 // -------------------------------------------------------------------------

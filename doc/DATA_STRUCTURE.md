@@ -6,7 +6,7 @@
 プロンプトまたはグループを表す基本単位。再帰的な構造を持つ。
 ```typescript
 export interface PsmItem {
-  id: number;           // 一意の識別子 (現在の実装では Date.now() + Math.random())
+  id: number;           // 一意の識別子 (現在の実装では Date.now() * 1000 + Math.floor(Math.random() * 1000) による完全な整数)
   name: string;         // 表示名 (グループ名またはプロンプトのエイリアス)
   content: string;      // 実際のプロンプト文字列 (例: "1girl, solo")
   enabled: boolean;     // 有効/無効フラグ
@@ -39,13 +39,13 @@ export interface PsmProfile {
 
 ```yaml
 positive:
-  - id: 1234567890.123
+  - id: 1780190551195
     name: "キャラクター"
     content: ""
     enabled: true
     is_group: true
     children:
-      - id: 1234567890.456
+      - id: 1780190551200
         name: "Main Character"
         content: "1girl, silver hair"
         enabled: true
@@ -53,7 +53,7 @@ positive:
         is_group: false
 
 negative:
-  - id: 9876543210.123
+  - id: 1780190551300
     name: "Low Quality"
     content: "lowres, bad anatomy"
     enabled: true
@@ -62,7 +62,7 @@ negative:
 profiles:
   - name: "MyProfile"
     states:
-      - id: 1234567890.456
+      - id: 1780190551200
         enabled: true
         weight: 1.2
 ```

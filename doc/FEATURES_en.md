@@ -6,12 +6,14 @@
 - **Positive / Negative:** Manage prompts in two independent trees.
 - **Grouping:** Create folders to categorize prompts.
 - **Infinite Nesting:** Create groups within groups (no depth limit).
-- **Reorder:** Intuitive reordering via Drag & Drop.
+- **Reorder:** Drag-and-drop handles (two columns of dots) are added to the left of groups and prompts for precise and intuitive reordering.
+- **Long Text Protection (Edit Icon Protection):** When prompt names or contents are extremely long, the maximum width of the chip text is automatically scaled down (110px) and the flex-shrink properties are optimized to keep the edit (pencil) icon visible and clickable.
 
 ### 1.2 Prompt Editing & Adjustment
 - **Enable/Disable:** Temporarily disable prompts via checkboxes without deleting them. Disabling a parent group excludes all child elements from output.
 - **Weighting:** Features a compact slider UI (`0.1` to `2.0`) next to each prompt chip for intuitive adjustments. Reset instantly to `1.0` with the "↺" button on the right edge of the slider.
 - **Toggle Slider Visibility:** You can turn the weight slider ON/OFF in settings (gear icon). The choice is remembered (LocalStorage) even after reloading the page.
+- **Underscore to Space Auto-Replacement:** If prompt content contains underscores (e.g., `sway_back`), they are automatically replaced with single spaces (e.g., `sway back`) when compiling and reflecting to the WebUI. However, Dynamic Prompts wildcards (e.g., `__character__`) are protected and their underscores are preserved.
 - **Tag Autocomplete Integration:** If `a1111-sd-webui-tagcomplete` is enabled, tag suggestions are available when typing prompts.
 - **Memo:** Attach memos to each prompt, viewable via tooltips.
 
@@ -94,7 +96,8 @@
 - **File List Refresh:** Reload the file structure via the refresh button.
 
 ### 3.4 Asynchronous Loading Indicator
-- **Loading Overlay:** Displays a full-screen, pointer-blocking loading overlay (`v-overlay`) during asynchronous operations with the server API (loading/saving/duplicating/renaming/deleting YAML files).
+- **Loading Overlay:** Displays a full-screen, pointer-blocking loading overlay (`v-overlay`) during initial YAML loading, file list retrieval, and file operations (creating, duplicating, renaming, and deleting files).
+- **No-Lock on Auto-Save:** Does not display the loading spinner during auto-saving (`savePrompts`) triggered by prompt toggles or weight slider adjustments, preventing user interactions from being locked.
 - **Operation Interlock:** Blocks all mouse and keyboard interactions during loading to prevent data corruption and race conditions caused by double clicks or concurrent updates.
 - **Reactive Progress Text:** Displays a central spinner (`v-progress-circular`) alongside localized messages such as "Loading..." or "Saving..." depending on the active operation.
 

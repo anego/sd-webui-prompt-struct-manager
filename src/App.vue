@@ -69,7 +69,7 @@ const handleSaveProfile = async () => {
 };
 
 const handleProfileSelect = async (name: string) => {
-  console.info(`[PSM] ユーザーによってプロファイル「${name}」が選択されたため、ツリー状態の適用を開始します。`);
+  console.debug(`[PSM] ユーザーによってプロファイル「${name}」が選択されたため、ツリー状態の適用を開始します。`);
   if (name) {
     await applyProfile(name);
   }
