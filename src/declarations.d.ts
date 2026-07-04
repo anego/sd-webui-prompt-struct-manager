@@ -7,7 +7,7 @@ declare module '*.css';
 // その他のリソース定義が必要な場合もここに追記
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
-  const component: DefineComponent<{}, {}, any>
+  const component: DefineComponent<{}, {}, unknown>
   export default component
 }
 

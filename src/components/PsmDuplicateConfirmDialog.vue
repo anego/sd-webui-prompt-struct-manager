@@ -61,7 +61,7 @@ onUnmounted(() => {
     max-width="450"
     :clickOutsideToClose="false"
   >
-    <v-card>
+    <v-card data-testid="duplicate-confirm-dialog">
       <v-card-title class="text-h6 pb-2" :class="mode === 'error' ? 'text-red' : 'text-warning'">
         <v-icon start>{{ mode === 'error' ? 'mdi-alert-circle' : 'mdi-alert' }}</v-icon>
         {{ mode === 'error' ? t('duplicateErrorTitle') || 'Duplicate Error' : t('duplicateWarnTitle') || 'Duplicate Warning' }}
@@ -69,7 +69,7 @@ onUnmounted(() => {
       <v-card-text class="pt-2 text-body-1" style="white-space: pre-wrap;">{{ mode === 'error' ? t('duplicateErrorMessage') || 'Cannot apply.' : t('duplicateWarnMessage') || 'Apply anyway?' }}</v-card-text>
       <v-card-actions class="pa-4 pt-0">
         <v-spacer></v-spacer>
-        <v-btn v-if="mode === 'warn'" color="grey" variant="text" @click="closeDialog">{{ t('cancelEsc') || 'Cancel' }}</v-btn>
+        <v-btn v-if="mode === 'warn'" color="grey" variant="text" @click="closeDialog" data-testid="duplicate-cancel-btn">{{ t('cancelEsc') || 'Cancel' }}</v-btn>
         <v-btn :color="mode === 'error' ? 'primary' : 'warning'" variant="elevated" @click="mode === 'warn' ? confirmDialog() : closeDialog()">
           {{ mode === 'error' ? (t('close') || 'Close') + ' (Enter)' : (t('apply') || 'Apply') + ' (Enter)' }}
         </v-btn>

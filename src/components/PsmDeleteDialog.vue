@@ -12,9 +12,9 @@ const { t } = useI18n();
 
 const item = computed(() => state.deletingItem);
 
-const btnGroupOnly = ref<any>(null);
-const btnDeleteAll = ref<any>(null);
-const btnCancel = ref<any>(null);
+const btnGroupOnly = ref<{ $el?: HTMLElement } | null>(null);
+const btnDeleteAll = ref<{ $el?: HTMLElement } | null>(null);
+const btnCancel = ref<{ $el?: HTMLElement } | null>(null);
 
 /**
  * ダイアログ表示時にキャンセルボタンに初期フォーカスを当てる（誤操作防止）
@@ -36,7 +36,7 @@ watch(
  * @param dir "next" (下/右) or "prev" (上/左)
  */
 const moveFocus = (dir: "next" | "prev") => {
-  const buttons: any[] = [];
+  const buttons: { $el?: HTMLElement }[] = [];
   if (btnGroupOnly.value) buttons.push(btnGroupOnly.value);
   if (btnDeleteAll.value) buttons.push(btnDeleteAll.value);
   if (btnCancel.value) buttons.push(btnCancel.value);

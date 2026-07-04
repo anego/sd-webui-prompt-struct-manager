@@ -10,21 +10,22 @@ export const setDebugMode = (enabled: boolean) => {
 };
 
 export const Logger = {
-  info: (msg: string, ...args: any[]) => {
-    console.log(`[PSM] ${msg}`, ...args);
+  info: (msg: string, ...args: unknown[]) => {
+    console.info(`[PSM] ${msg}`, ...args);
   },
 
-  warn: (msg: string, ...args: any[]) => {
+  warn: (msg: string, ...args: unknown[]) => {
     console.warn(`[PSM] ${msg}`, ...args);
   },
 
-  error: (msg: string, ...args: any[]) => {
+  error: (msg: string, ...args: unknown[]) => {
     console.error(`[PSM] ${msg}`, ...args);
   },
 
-  debug: (msg: string, ...args: any[]) => {
+  debug: (msg: string, ...args: unknown[]) => {
     if (isDebugMode) {
-      console.log(`[PSM] [Debug] ${msg}`, ...args);
+      console.debug(`[PSM] [Debug] ${msg}`, ...args);
     }
   }
 };
+

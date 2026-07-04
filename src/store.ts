@@ -1,5 +1,5 @@
 import { reactive, watch } from "vue";
-import { PsmItem, DuplicateCheckMode } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState } from "./types";
 import { Logger, setDebugMode } from "./log";
 
 /**
@@ -24,8 +24,7 @@ export const state = reactive({
   yamlFiles: [] as string[],
   /** 現在選択中のYAMLファイル名 */
   selectedFile: "",
-  /** 検索クエリ文字列 */
-  searchQuery: "",
+
   /** 設定保存ディレクトリパス */
   configDir: "",
   /** 初期設定済みかどうか */
@@ -66,6 +65,22 @@ export const state = reactive({
   duplicateTexts: new Set<string>(),
   /** 現在のハイライトレベル（色分け用） */
   duplicateHighlightLevel: null as "warn" | "error" | null,
+  /** 最後に選択されていたファイル名 */
+  lastFile: "",
+  /** 重みスライダーを表示するかどうか */
+  showWeightSlider: true,
+  /** 保存されているプロファイル（ツリースナップショット） */
+  profiles: [] as PsmProfile[],
+  /** 現在選択（適用）されているプロファイル名 */
+  selectedProfileName: "",
+  /** 非同期処理実行中フラグ */
+  isLoading: false,
+  /** ローディングテキストの翻訳キー */
+  loadingText: "",
+  /** プロンプト大辞典が検出・マウントされているかどうかのフラグ */
+  hasDictionary: false,
+  /** ローディング多重度カウンタ */
+  loadingCount: 0,
 });
 
 /**
@@ -75,7 +90,7 @@ export const state = reactive({
 const cloneNodeRecursive = (node: PsmItem): PsmItem => {
   const newNode = {
     ...JSON.parse(JSON.stringify(node)),
-    id: Date.now() + Math.random(),
+    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
   };
   if (newNode.is_group && newNode.children) {
     newNode.children = newNode.children.map((child: PsmItem) =>
@@ -110,6 +125,7 @@ export const findParentAndItem = (targetId: number, nodes: PsmItem[], parent: Ps
  * クリップボードを経由せず即座に反映されます。
  */
 export const duplicateItem = async (item: PsmItem, parentChildren: PsmItem[]) => {
+  state.selectedProfileName = "";
   const idx = parentChildren.indexOf(item);
   if (idx === -1) return;
   const newItem = cloneNodeRecursive(item);
@@ -155,7 +171,7 @@ export const cancelDelete = () => {
  */
 export const addItem = (list: PsmItem[], is_group: boolean, atIndex?: number) => {
   const newItem: PsmItem = {
-    id: Date.now() + Math.random(),
+    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
     name: "",
     content: "",
     enabled: true,
@@ -187,6 +203,7 @@ export const startEdit = (item: PsmItem) => {
  */
 export const finishEdit = async () => {
   if (!state.editingItem) return;
+  state.selectedProfileName = "";
   try {
     const updateTree = (nodes: PsmItem[]) => {
       for (let i = 0; i < nodes.length; i++) {
@@ -210,7 +227,7 @@ export const finishEdit = async () => {
     // 成功後に閉じる
     state.isEditing = false;
   } catch (e) {
-    Logger.error("Failed to finish edit:", e);
+    Logger.error("[Store/Edit] 編集内容の保存処理中にエラーが発生しました。", e);
     // 保存失敗時は閉じないことでユーザーに気付きを与える
     alert("Failed to save changes. Check console for details.");
   }
@@ -242,6 +259,7 @@ export const cancelEdit = () => {
  * @param mode "all": アイテムごと削除, "only": グループ枠のみ削除し子は親に昇格
  */
 export const deleteItemFromTree = async (item: PsmItem, mode: "all" | "only") => {
+  state.selectedProfileName = "";
   const findAndRemove = (list: PsmItem[]): boolean => {
     // Use loose equality just in case of type drift
     const idx = list.findIndex(n => n && n.id == item.id);
@@ -277,9 +295,169 @@ export const deleteItemFromTree = async (item: PsmItem, mode: "all" | "only") =>
 
 // グループの有効無効切り替え（子要素自体のenabledは変更せず、親の状態が計算プロパティで反映される）
 export const toggleGroupEnabled = async (group: PsmItem) => {
+  state.selectedProfileName = "";
   group.enabled = !group.enabled;
   await savePrompts();
 };
+
+/**
+ * アイテムの有効/無効状態をトグルする
+ * 親グループが排他選択（isExclusive）の場合は、他の兄弟要素をすべて無効化する
+ */
+export const toggleItemEnabled = async (item: PsmItem, parentChildren: PsmItem[], parentGroup?: PsmItem) => {
+  state.selectedProfileName = "";
+  item.enabled = !item.enabled;
+  
+  if (item.enabled && parentGroup?.isExclusive) {
+    // 他のすべての兄弟要素を無効化
+    for (const sibling of parentChildren) {
+      if (sibling.id !== item.id) {
+        sibling.enabled = false;
+      }
+    }
+  }
+  await savePrompts();
+};
+
+/**
+ * グループの排他選択（isExclusive）のトグルを処理する
+ * ONにされた場合、すでに複数有効なものがあれば最初の1つだけを残して無効化する
+ */
+export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) => {
+  state.selectedProfileName = "";
+  if (forceVal !== undefined) {
+    group.isExclusive = forceVal;
+  } else {
+    group.isExclusive = !group.isExclusive;
+  }
+  
+  if (group.isExclusive && group.children) {
+    let hasEnabled = false;
+    for (const child of group.children) {
+      if (child.enabled) {
+        if (hasEnabled) {
+          child.enabled = false;
+        } else {
+          hasEnabled = true;
+        }
+      }
+    }
+  }
+  await savePrompts();
+};
+
+/**
+ * プロンプトアイテムの重み（weight）を 1.0 にリセットする
+ */
+export const resetWeight = async (item: PsmItem) => {
+  state.selectedProfileName = "";
+  item.weight = 1.0;
+  await savePrompts();
+};
+
+/**
+ * ツリー全体から各アイテムの状態（id, enabled, weight）を収集するヘルパー関数
+ */
+const collectStates = (nodes: PsmItem[]): PsmProfileState[] => {
+  const result: PsmProfileState[] = [];
+  const walk = (items: PsmItem[]) => {
+    for (const item of items) {
+      if (!item) continue;
+      result.push({
+        id: item.id,
+        enabled: item.enabled,
+        weight: item.weight
+      });
+      if (item.is_group && item.children) {
+        walk(item.children);
+      }
+    }
+  };
+  walk(nodes);
+  return result;
+};
+
+/**
+ * 現在の状態のスナップショットを指定の名前でプロファイルとして保存する
+ */
+export const saveProfile = async (name: string) => {
+  if (!name.trim()) return;
+  const states = [
+    ...collectStates(state.positive),
+    ...collectStates(state.negative)
+  ];
+  
+  const existingIdx = state.profiles.findIndex(p => p.name === name);
+  if (existingIdx !== -1) {
+    state.profiles[existingIdx].states = states;
+  } else {
+    state.profiles.push({ name, states });
+  }
+  state.selectedProfileName = name;
+  await savePrompts();
+};
+
+/**
+ * 保存されている状態スナップショット（プロファイル）をツリー全体に高速適用する
+ */
+export const applyProfile = async (name: string) => {
+  console.debug(`[PSM][Store/Profile] プロファイル「${name}」の適用処理を開始します。`);
+  const profile = state.profiles.find(p => p.name === name);
+  if (!profile) {
+    console.warn(`[PSM][Store/Profile] 指定されたプロファイル「${name}」が見つかりませんでした。適用をスキップします。`);
+    return;
+  }
+  
+  // 適用されるプロファイル定義の詳細情報を折りたたんでテーブル表示
+  console.groupCollapsed(`[PSM][Store/Profile] プロファイル「${name}」からロードされた状態定義の詳細情報を展開します。`);
+  console.debug(`[PSM] 状態定義数: ${profile.states.length} 件`);
+  console.table(profile.states);
+  console.groupEnd();
+  
+  const stateMap = new Map<number, { enabled: boolean; weight: number }>();
+  for (const s of profile.states) {
+    stateMap.set(s.id, { enabled: s.enabled, weight: s.weight });
+  }
+  
+  let appliedCount = 0;
+  const walk = (items: PsmItem[]) => {
+    for (const item of items) {
+      if (!item) continue;
+      const snap = stateMap.get(item.id);
+      if (snap) {
+        item.enabled = snap.enabled;
+        item.weight = snap.weight;
+        appliedCount++;
+      }
+      if (item.is_group && item.children) {
+        walk(item.children);
+      }
+    }
+  };
+  
+  walk(state.positive);
+  walk(state.negative);
+  
+  console.debug(`[PSM][Store/Profile] プロファイル「${name}」の適用が完了しました。（適用ノード数: ${appliedCount} 件）`);
+  
+  state.selectedProfileName = name;
+  await savePrompts();
+};
+
+/**
+ * 指定された名前のプロファイルを削除する
+ */
+export const deleteProfile = async (name: string) => {
+  const idx = state.profiles.findIndex(p => p.name === name);
+  if (idx !== -1) {
+    state.profiles.splice(idx, 1);
+    if (state.selectedProfileName === name) {
+      state.selectedProfileName = "";
+    }
+    await savePrompts();
+  }
+};
+
 
 /**
  * グループ内の子要素すべての enabled 状態を一括変更する
@@ -287,6 +465,7 @@ export const toggleGroupEnabled = async (group: PsmItem) => {
  * @param enabled true: 有効化, false: 無効化
  */
 export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) => {
+  state.selectedProfileName = "";
   if (!group.children) return;
   const walk = (nodes: PsmItem[]) => {
     for (const node of nodes) {
@@ -303,10 +482,34 @@ export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) 
 };
 
 /**
+ * ローディング表示を開始するヘルパー関数
+ */
+export const startLoading = (textKey: string) => {
+  if (state.loadingCount === 0) {
+    state.loadingText = textKey;
+    state.isLoading = true;
+  }
+  state.loadingCount++;
+};
+
+/**
+ * ローディング表示を終了するヘルパー関数
+ */
+export const stopLoading = () => {
+  state.loadingCount--;
+  if (state.loadingCount <= 0) {
+    state.loadingCount = 0;
+    state.isLoading = false;
+    state.loadingText = "";
+  }
+};
+
+/**
  * サーバーからYAMLファイル一覧を取得する
  * 取得後、選択中のファイルがなければ自動的に最初のファイルを選択する
  */
 export const listFiles = async () => {
+  startLoading("loading");
   try {
     const res = await fetch("/psm/list-files");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -315,15 +518,17 @@ export const listFiles = async () => {
     
     // last_fileがあればそれを選択
     if (!state.selectedFile) {
-       if ((state as any).lastFile && state.yamlFiles.includes((state as any).lastFile)) {
-         state.selectedFile = (state as any).lastFile;
+       if (state.lastFile && state.yamlFiles.includes(state.lastFile)) {
+         state.selectedFile = state.lastFile;
          await loadPrompts();
        }
        // Fallback removed to allow unselected state on directory change
     }
-    Logger.debug("Files listed:", state.yamlFiles);
+    Logger.debug("[Store/Data] サーバーから取得したYAMLファイルの一覧を読み込みました。", state.yamlFiles);
   } catch (e) {
-    Logger.error("Failed to list files:", e);
+    Logger.error("[Store/Data] サーバーからのYAMLファイル一覧取得処理に失敗しました。", e);
+  } finally {
+    stopLoading();
   }
 };
 
@@ -332,22 +537,37 @@ export const listFiles = async () => {
  */
 export const loadPrompts = async () => {
   if (!state.selectedFile) return;
+  startLoading("loading");
   try {
-    Logger.debug(`Loading prompts from ${state.selectedFile}...`);
+    Logger.debug(`[Store/Data] ファイル「${state.selectedFile}」からのプロンプト読み込み処理を開始します。`);
     const res = await fetch(`/psm/get-prompts?file=${state.selectedFile}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.positive = (data.positive || []).filter((i: PsmItem) => i != null);
     state.negative = (data.negative || []).filter((i: PsmItem) => i != null);
+    state.profiles = data.profiles || [];
+    state.selectedProfileName = "";
     
+    // 読み込まれたプロンプトデータの要約をテーブルとグループで可視化
+    console.groupCollapsed(`[PSM][Store/Data] ファイル「${state.selectedFile}」から読み込まれたプロンプトツリー構造の要約を展開します。`);
+    console.debug(`[PSM][Store/Data] 読み込まれたPositiveプロンプトのノード数: ${state.positive.length} 件`);
+    console.debug(`[PSM][Store/Data] 読み込まれたNegativeプロンプトのノード数: ${state.negative.length} 件`);
+    if (state.profiles.length > 0) {
+      console.debug(`[PSM][Store/Data] ファイル内から検出されたプロファイルの一覧です。`);
+      console.table(state.profiles.map(p => ({ "プロファイル名": p.name, "定義状態数": p.states.length })));
+    }
+    console.groupEnd();
+
     // last_fileを保存
-    if (state.selectedFile !== (state as any).lastFile) {
-      (state as any).lastFile = state.selectedFile;
+    if (state.selectedFile !== state.lastFile) {
+      state.lastFile = state.selectedFile;
       saveSettingsLocal();
     }
-    Logger.debug("Prompts loaded successfully.");
+    Logger.info(`[Store/Data] ファイル「${state.selectedFile}」からプロンプトデータを正常に読み込みました。`);
   } catch (e) {
-    Logger.error("Failed to load prompts:", e);
+    Logger.error("[Store/Data] 選択されたYAMLファイルからのプロンプト読み込みに失敗しました。", e);
+  } finally {
+    stopLoading();
   }
 };
 
@@ -357,7 +577,7 @@ export const loadPrompts = async () => {
 export const savePrompts = async () => {
   if (!state.selectedFile) return;
   try {
-    Logger.debug(`Saving prompts to ${state.selectedFile}...`);
+    Logger.debug(`[Store/Data] 現在のプロンプト状態をファイル「${state.selectedFile}」へ保存する処理を開始します。`);
     const res = await fetch("/psm/save-prompts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -365,13 +585,13 @@ export const savePrompts = async () => {
         file: state.selectedFile,
         positive: state.positive,
         negative: state.negative,
+        profiles: state.profiles,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    Logger.debug("Prompts saved successfully.");
+    Logger.debug("[Store/Data] プロンプトデータをファイルへ正常に書き込みました。");
   } catch (e) {
-    Logger.error("Failed to save prompts:", e);
-    // UI notification would be good here
+    Logger.error("[Store/Data] プロンプトデータのファイル保存に失敗しました。", e);
   }
 };
 
@@ -380,15 +600,20 @@ export const savePrompts = async () => {
  * @param name ファイル名 (拡張子なしでも可)
  */
 export const createYamlFile = async (name: string) => {
-  const filename = name.endsWith(".yaml") ? name : `${name}.yaml`;
-  await fetch("/psm/save-prompts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: filename, positive: [], negative: [] }),
-  });
-  await listFiles();
-  state.selectedFile = filename;
-  await loadPrompts();
+  startLoading("saving");
+  try {
+    const filename = name.endsWith(".yaml") ? name : `${name}.yaml`;
+    await fetch("/psm/save-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: filename, positive: [], negative: [] }),
+    });
+    await listFiles();
+    state.selectedFile = filename;
+    await loadPrompts();
+  } finally {
+    stopLoading();
+  }
 };
 
 /**
@@ -396,15 +621,20 @@ export const createYamlFile = async (name: string) => {
  * @param n 新しいファイル名
  */
 export const duplicateCurrentFile = async (n: string) => {
-  const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
-  await fetch("/psm/duplicate-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ src: state.selectedFile, dst: fn }),
-  });
-  await listFiles();
-  state.selectedFile = fn;
-  await loadPrompts();
+  startLoading("saving");
+  try {
+    const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+    await fetch("/psm/duplicate-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: state.selectedFile, dst: fn }),
+    });
+    await listFiles();
+    state.selectedFile = fn;
+    await loadPrompts();
+  } finally {
+    stopLoading();
+  }
 };
 
 /**
@@ -412,26 +642,36 @@ export const duplicateCurrentFile = async (n: string) => {
  * @param n 新しいファイル名
  */
 export const renameCurrentFile = async (n: string) => {
-  const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
-  await fetch("/psm/rename-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ src: state.selectedFile, dst: fn }),
-  });
-  await listFiles();
-  state.selectedFile = fn;
+  startLoading("saving");
+  try {
+    const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+    await fetch("/psm/rename-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: state.selectedFile, dst: fn }),
+    });
+    await listFiles();
+    state.selectedFile = fn;
+  } finally {
+    stopLoading();
+  }
 };
 
 /**
  * 現在のファイルを削除する
  */
 export const deleteCurrentFile = async () => {
-  await fetch(`/psm/delete-file?file=${state.selectedFile}`, {
-    method: "DELETE",
-  });
-  state.selectedFile = "";
-  await listFiles();
-  await loadPrompts();
+  startLoading("saving");
+  try {
+    await fetch(`/psm/delete-file?file=${state.selectedFile}`, {
+      method: "DELETE",
+    });
+    state.selectedFile = "";
+    await listFiles();
+    await loadPrompts();
+  } finally {
+    stopLoading();
+  }
 };
 
 
@@ -450,15 +690,16 @@ export const loadSettingsLocal = () => {
       if (data.ui_scale) state.uiScale = data.ui_scale;
       if (data.lang) state.lang = data.lang;
       if (data.last_file) {
-        (state as any).lastFile = data.last_file;
+        state.lastFile = data.last_file;
         // ファイルリスト取得前なのでセットだけしておく
         // listFiles内で反映される
       }
       if (data.sidebar_open !== undefined) state.isSidebarOpen = data.sidebar_open;
       if (data.toggle_shortcut) state.toggleShortcut = data.toggle_shortcut;
       if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
+      if (data.show_weight_slider !== undefined) state.showWeightSlider = data.show_weight_slider;
     } catch (e) {
-      Logger.error("Failed to load local settings", e);
+      Logger.error("[Store/Settings] ローカル設定（LocalStorage）の読み込みに失敗しました。", e);
     }
   }
 };
@@ -467,10 +708,11 @@ export const saveSettingsLocal = () => {
   const data = {
     ui_scale: state.uiScale,
     lang: state.lang,
-    last_file: state.selectedFile || (state as any).lastFile,
+    last_file: state.selectedFile || state.lastFile,
     sidebar_open: state.isSidebarOpen,
     toggle_shortcut: state.toggleShortcut,
     duplicate_check_mode: state.duplicateCheckMode,
+    show_weight_slider: state.showWeightSlider,
   };
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 };
@@ -493,9 +735,9 @@ export const loadConfig = async () => {
     
     // LocalStorageからも読み込む
     loadSettingsLocal();
-    Logger.info(`Config loaded. configured=${state.isConfigured}, dev=${state.isDevMode}`);
+    Logger.info(`[Store/Config] サーバーからグローバル設定を読み込みました。(セットアップ完了状況: ${state.isConfigured}, デバッグモード: ${state.isDevMode})`);
   } catch (e) {
-    Logger.error("Failed to load global config:", e);
+    Logger.error("[Store/Config] サーバーからのグローバル設定読み込みに失敗しました。", e);
   }
 };
 
@@ -510,7 +752,7 @@ export const saveConfig = async (dir: string) => {
     state.positive = [];
     state.negative = [];
     state.yamlFiles = [];
-    (state as any).lastFile = ""; // Clear last file memory
+    state.lastFile = ""; // Clear last file memory
     saveSettingsLocal(); // Persist
 
     await fetch("/psm/set-config", {
@@ -525,9 +767,9 @@ export const saveConfig = async (dir: string) => {
     setDebugMode(state.isDevMode);
     await loadConfig();
     await listFiles(); // 新しいディレクトリの内容を反映
-    Logger.info("Config saved and file list refreshed.");
+    Logger.info("[Store/Config] 新しい設定をサーバーへ保存し、YAMLファイル一覧を再読み込みしました。");
   } catch (e) {
-    Logger.error("Failed to save config:", e);
+    Logger.error("[Store/Config] サーバーへの設定保存に失敗しました。", e);
   }
 };
 
@@ -558,7 +800,7 @@ export const pickDirectory = async () => {
       // listFiles is strictly called within saveConfig now
     }
   } catch (e) {
-    Logger.error("Failed to pick directory:", e);
+    Logger.error("[Store/Config] フォルダ選択ダイアログの起動、またはパスの取得に失敗しました。", e);
   }
 };
 
@@ -592,7 +834,7 @@ const parsePrompts = (raw: string): PsmItem[] => {
     .map((s) => s.trim())
     .filter((s) => s)
     .map((s) => ({
-      id: Date.now() + Math.random(),
+      id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
       name: "",
       content: s,
       enabled: true,
@@ -629,8 +871,16 @@ export const getCompiledPrompts = (nodes: PsmItem[], separator = ", "): string =
         }
       } else {
         // アイテム
+        let content = n.content;
+
+        // ワイルドカード（__wildcard__）はアンダーバーを置換しない
+        const isWildcard = /^__.+__$/.test(content.trim());
+        if (!isWildcard) {
+          content = content.replace(/_/g, " ");
+        }
+
         // コンテンツ内の () をエスケープする
-        let content = n.content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+        content = content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
         
         // 末尾のカンマや空白を除去 (例: "foo, " -> "foo")
         content = content.replace(/,\s*$/, "").trim();
@@ -752,3 +1002,5 @@ export const setDuplicateCheckMode = async (mode: DuplicateCheckMode) => {
   saveSettingsLocal();
   clearDuplicateHighlight();
 };
+
+

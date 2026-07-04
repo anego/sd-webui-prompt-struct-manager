@@ -22,7 +22,20 @@ export interface PsmItem {
   /** 子要素のリスト (グループの場合のみ存在) */
   children?: PsmItem[];
   isRandom?: boolean;
+  isExclusive?: boolean;
 }
+
+export interface PsmProfileState {
+  id: number;
+  enabled: boolean;
+  weight: number;
+}
+
+export interface PsmProfile {
+  name: string;
+  states: PsmProfileState[];
+}
+
 
 /**
  * 重複プロンプトのチェック設定モード

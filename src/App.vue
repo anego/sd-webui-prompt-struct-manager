@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, provide } from "vue";
+import { ref, watch, onMounted, onUnmounted, provide, computed } from "vue";
 import {
   state,
   loadPrompts,
@@ -18,6 +18,9 @@ import {
   findParentAndItem,
   detectDuplicates,
   clearDuplicateHighlight,
+  saveProfile,
+  applyProfile,
+  deleteProfile,
 } from "./store";
 import { PsmItem } from "./types";
 import PsmEditModal from "./components/PsmEditModal.vue";
@@ -36,10 +39,54 @@ const { t } = useI18n();
 
 const buildTimestamp = __BUILD_TIMESTAMP__;
 
+const getWebUiRoot = (): Document | ShadowRoot => {
+  const gradioApp = document.querySelector("gradio-app");
+  return gradioApp?.shadowRoot || document;
+};
+
 // ダイアログの表示状態管理
-const dialogs = ref({ new: false, copy: false, rename: false, import: false, generate: false });
+const dialogs = ref({
+  new: false,
+  copy: false,
+  rename: false,
+  import: false,
+  generate: false,
+  profileNew: false,
+  profileDelete: false,
+});
+const newProfileNameInput = ref("");
+
+const openSaveProfileDialog = () => {
+  newProfileNameInput.value = state.selectedProfileName || "";
+  dialogs.value.profileNew = true;
+};
+
+const handleSaveProfile = async () => {
+  if (!newProfileNameInput.value.trim()) return;
+  await saveProfile(newProfileNameInput.value.trim());
+  dialogs.value.profileNew = false;
+  newProfileNameInput.value = "";
+};
+
+const handleProfileSelect = async (name: string) => {
+  console.debug(`[PSM] ユーザーによってプロファイル「${name}」が選択されたため、ツリー状態の適用を開始します。`);
+  if (name) {
+    await applyProfile(name);
+  }
+};
+
+const openDeleteProfileDialog = () => {
+  if (!state.selectedProfileName) return;
+  dialogs.value.profileDelete = true;
+};
+
+const handleDeleteProfile = async () => {
+  if (!state.selectedProfileName) return;
+  await deleteProfile(state.selectedProfileName);
+  dialogs.value.profileDelete = false;
+};
 const duplicateDialog = ref({ show: false, mode: "warn" as "warn" | "error" });
-const menuState = ref({ visible: false, x: 0, y: 0, items: [] as any[] });
+const menuState = ref({ visible: false, x: 0, y: 0, items: [] as unknown[] });
 
 // 右クリックメニューの状態
 const contextMenu = ref({
@@ -80,12 +127,11 @@ provide("psm-context-menu", openContextMenu);
 const handleApply = () => {
   const posStr = getCompiledPrompts(state.positive);
   const negStr = getCompiledPrompts(state.negative);
-  const prefix =
-    document.getElementById("img2img_generate")?.offsetParent !== null
-      ? "img2img"
-      : "txt2img";
+  const root = getWebUiRoot();
+  const img2imgGen = root.getElementById("img2img_generate");
+  const prefix = img2imgGen && img2imgGen.offsetParent !== null ? "img2img" : "txt2img";
   const updateTextarea = (selector: string, text: string) => {
-    const ta = document.querySelector(selector)?.querySelector("textarea");
+    const ta = root.querySelector(selector)?.querySelector("textarea");
     if (ta) {
       // React等のフレームワークがstate更新を検知できるようにフォーカスを当てる
       // 画面スクロールを防ぐため preventScroll: true を指定
@@ -164,11 +210,10 @@ const executeGenerate = async () => {
     // GUIの更新を待つために少し待機 (GradIOの反映待ち)
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    const prefix =
-      document.getElementById("img2img_generate")?.offsetParent !== null
-        ? "img2img"
-        : "txt2img";
-    const generateBtn = document.getElementById(`${prefix}_generate`);
+    const root = getWebUiRoot();
+    const img2imgGen = root.getElementById("img2img_generate");
+    const prefix = img2imgGen && img2imgGen.offsetParent !== null ? "img2img" : "txt2img";
+    const generateBtn = root.getElementById(`${prefix}_generate`);
     if (generateBtn) {
       generateBtn.click();
       // スクロール処理は削除
@@ -229,8 +274,67 @@ const { handleGlobalKeydown: handleNavKeydown } = useKeyboardNav({
   onContextMenu: handleKeyboardContextMenu
 });
 
+/**
+ * 大辞典の「挿入」アクションを検知し、PSMの編集欄へ割り込み入力するイベントハンドラ
+ * (キャプチャフェーズで検知して伝播を停止させる)
+ */
+const handleDictionaryInsertIntercept = (event: MouseEvent) => {
+  // モーダルが展開中、かつグループではなくプロンプトを編集中のときのみインターセプト
+  if (!state.isEditing || !state.editingItem || state.editingItem.is_group) {
+    return;
+  }
+
+  const path = event.composedPath();
+  let insertButton: HTMLElement | null = null;
+  for (const el of path) {
+    if (el instanceof HTMLElement && el.hasAttribute("data-pd-insert")) {
+      insertButton = el;
+      break;
+    }
+  }
+
+  if (insertButton) {
+    // 本来の動作（WebUIプロンプト欄への挿入）を防止
+    event.stopPropagation();
+    event.preventDefault();
+
+    const tag = insertButton.dataset.pdInsert || "";
+    if (tag) {
+      let current = state.editingItem.content || "";
+      current = current.trim();
+      if (current) {
+        if (!current.endsWith(",")) {
+          current += ", ";
+        } else {
+          current += " ";
+        }
+      }
+      state.editingItem.content = current + tag;
+
+      // パネルのステータス表示を更新
+      const panel = insertButton.closest(".pd-inline-panel");
+      if (panel) {
+        const statusEl = panel.querySelector(".pd-inline-status");
+        if (statusEl) {
+          statusEl.textContent = "PSMに挿入しました";
+        }
+
+        // 大辞典の検索欄の入力内容をプロンプト名にコピー（名前が未設定の場合のみ）
+        const queryInput = panel.querySelector(".pd-inline-query") as HTMLInputElement | null;
+        if (queryInput && queryInput.value) {
+          const queryVal = queryInput.value.trim();
+          if (queryVal && (!state.editingItem.name || state.editingItem.name.trim() === "")) {
+            state.editingItem.name = queryVal;
+          }
+        }
+      }
+    }
+  }
+};
+
 onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
+  window.addEventListener("click", handleDictionaryInsertIntercept, true);
   await loadConfig();
   if (state.isConfigured) {
     await listFiles();
@@ -248,9 +352,10 @@ watch(
   }
 );
 
-onUnmounted(() =>
-  window.removeEventListener("keydown", handleGlobalKeydown, true),
-);
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown, true);
+  window.removeEventListener("click", handleDictionaryInsertIntercept, true);
+});
 
 const matchShortcut = (e: KeyboardEvent, shortcut: string) => {
   if (!shortcut) return false;
@@ -286,6 +391,21 @@ const matchShortcut = (e: KeyboardEvent, shortcut: string) => {
 };
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
+  // 入力欄（input, textarea, contenteditable）での入力を邪魔しないためのガード
+  const target = e.target as HTMLElement | null;
+  const isInput = target && (
+    target.tagName === "INPUT" || 
+    target.tagName === "TEXTAREA" || 
+    target.isContentEditable
+  );
+
+  // 入力中の場合、修飾キー（Ctrl, Alt, Meta）を伴わない単体キー（例: "M"）によるショートカットはスルーする
+  // ※ただし、Escape や Enter は入力欄でも有効に動作させたいため、これらは除く
+  const hasModifier = e.ctrlKey || e.altKey || e.metaKey;
+  if (isInput && !hasModifier && e.key !== "Escape" && e.key !== "Enter") {
+    return;
+  }
+
   // Configurable Toggle Shortcut
   if (state.toggleShortcut && matchShortcut(e, state.toggleShortcut)) {
     e.preventDefault();
@@ -381,6 +501,44 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
                ({{ buildTimestamp }})
             </span>
           </v-toolbar-title>
+          <!-- プロファイル選択・保存・削除 UI -->
+          <div v-if="state.selectedFile" class="d-flex align-center ga-2 ml-4 mr-2" style="width: 280px;">
+            <v-select
+              v-model="state.selectedProfileName"
+              :items="state.profiles.map(p => p.name)"
+              :label="t('profiles')"
+              density="compact"
+              hide-details
+              variant="outlined"
+              :menu-props="{ zIndex: 20000010 }"
+              @update:modelValue="handleProfileSelect"
+              class="flex-grow-1"
+              style="max-width: 180px;"
+              attach
+            ></v-select>
+            <v-btn
+              icon
+              size="x-small"
+              @click.stop="openSaveProfileDialog"
+              :title="t('saveProfile')"
+              color="primary"
+              data-testid="save-profile-btn"
+            >
+              <v-icon size="small">mdi-content-save</v-icon>
+            </v-btn>
+            <v-btn
+              icon
+              size="x-small"
+              :disabled="!state.selectedProfileName"
+              @click.stop="openDeleteProfileDialog"
+              :title="t('deleteProfile')"
+              color="error"
+              data-testid="delete-profile-btn"
+            >
+              <v-icon size="small">mdi-delete</v-icon>
+            </v-btn>
+          </div>
+
           <v-spacer></v-spacer>
           <div class="d-flex align-center ga-2 mr-2">
             <v-btn
@@ -473,6 +631,58 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         v-model:renameDialog="dialogs.rename"
         v-model:importDialog="dialogs.import"
       />
+
+      <!-- プロファイル新規保存ダイアログ -->
+      <v-dialog v-model="dialogs.profileNew" max-width="400" attach>
+        <v-card>
+          <v-card-title class="text-h6 pb-2">
+            💾 {{ t('saveProfile') }}
+          </v-card-title>
+          <v-card-text>
+            <v-text-field
+              v-model="newProfileNameInput"
+              :label="t('newProfileName')"
+              variant="outlined"
+              density="compact"
+              autofocus
+              @keydown.enter="handleSaveProfile"
+            ></v-text-field>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn variant="text" @click="dialogs.profileNew = false" data-testid="profile-save-cancel-btn">
+              {{ t('cancel') }}
+            </v-btn>
+            <v-btn color="primary" variant="elevated" @click="handleSaveProfile" :disabled="!newProfileNameInput.trim()" data-testid="profile-save-confirm-btn">
+              {{ t('save') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- プロファイル削除確認ダイアログ -->
+      <v-dialog v-model="dialogs.profileDelete" max-width="400" attach>
+        <v-card>
+          <v-card-title class="text-h6 pb-2">
+            ⚠️ {{ t('deleteProfile') }}
+          </v-card-title>
+          <v-card-text>
+            {{ t('confirmProfileDelete') }}
+            <div class="mt-2 text-subtitle-1 font-weight-bold text-orange">
+              "{{ state.selectedProfileName }}"
+            </div>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn variant="text" @click="dialogs.profileDelete = false" data-testid="profile-delete-cancel-btn">
+              {{ t('cancel') }}
+            </v-btn>
+            <v-btn color="error" variant="elevated" @click="handleDeleteProfile" data-testid="profile-delete-confirm-btn">
+              {{ t('delete') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
       
       <PsmDuplicateConfirmDialog
         v-model="duplicateDialog.show"
@@ -485,6 +695,30 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         v-model="dialogs.generate"
         @confirm="executeGenerate"
       />
+      
+      <!-- 操作不可のローディングオーバーレイ -->
+      <v-overlay
+        v-model="state.isLoading"
+        class="align-center justify-center psm-loading-overlay"
+        persistent
+        scrim="black"
+        :opacity="0.6"
+        z-index="30000000"
+        attach
+        data-testid="loading-overlay"
+      >
+        <div class="text-center d-flex flex-column align-center ga-3">
+          <v-progress-circular
+            color="orange"
+            indeterminate
+            size="64"
+            width="6"
+          ></v-progress-circular>
+          <div class="text-white text-subtitle-1 font-weight-bold" v-if="state.loadingText">
+            {{ t(state.loadingText) }}
+          </div>
+        </div>
+      </v-overlay>
     </v-app>
   </div>
 </template>

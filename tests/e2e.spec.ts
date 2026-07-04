@@ -16,7 +16,7 @@ async function forceEnglish(page: Page) {
 }
 
 async function startDrag(page: Page, source: Locator) {
-  const sourceHandle = source.locator(".drag-handle").first();
+  const sourceHandle = source.locator(".psm-node__drag-handle").first();
   const sourceBox = await sourceHandle.boundingBox();
   if (!sourceBox) throw new Error("Source handle not found");
 
@@ -32,7 +32,7 @@ async function startDrag(page: Page, source: Locator) {
   await page.mouse.move(cx, cy, { steps });
 
   // Wait for drag state (check for drop zones appearing)
-  await page.locator(".drop-into-zone").first().waitFor({ state: "visible", timeout: 2000 });
+  await page.locator(".psm-node__drop-zone").first().waitFor({ state: "visible", timeout: 2000 });
 }
 
 async function dragAndDropToZone(page: Page, source: Locator, zoneLocatorFunc: () => Locator) {
@@ -132,14 +132,14 @@ test.describe("PSM E2E Test Suite", () => {
     const childPrompt = `Child_${uniq}`;
 
     // Add Group to Root
-    await page.locator(".psm-pane-open").first().getByTestId("root-add-group").click();
+    await page.locator(".psm-pane--open").first().getByTestId("root-add-group").click();
     await page.getByTestId("edit-name-input").locator("input").fill(groupName);
     // Explicitly trigger input event for Vuetify/validation
     await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
     await page.getByTestId("edit-save-btn").click();
 
     // Add Prompt to Root
-    await page.locator(".psm-pane-open").first().getByTestId("root-add-prompt").click();
+    await page.locator(".psm-pane--open").first().getByTestId("root-add-prompt").click();
     // Prompt content
     const textarea = page.getByTestId("edit-content-input").locator("textarea").first();
     await textarea.fill("masterpiece");
@@ -153,7 +153,7 @@ test.describe("PSM E2E Test Suite", () => {
     await page.getByTestId("edit-save-btn").click();
 
     // Verify presence
-    const group = page.locator(".group-container", { hasText: groupName }).first();
+    const group = page.locator(".psm-node__group", { hasText: groupName }).first();
     const prompt = page.locator(".v-chip", { hasText: promptName }).first();
     await expect(group).toBeVisible();
     await expect(prompt).toBeVisible();
@@ -179,12 +179,12 @@ test.describe("PSM E2E Test Suite", () => {
     const itemName = `DnD_Item_${uniq}`;
 
     // Setup
-    await page.locator(".psm-pane-open").first().getByTestId("root-add-group").click();
+    await page.locator(".psm-pane--open").first().getByTestId("root-add-group").click();
     await page.getByTestId("edit-name-input").locator("input").fill(groupName);
     await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
     await page.getByTestId("edit-save-btn").click();
 
-    await page.locator(".psm-pane-open").first().getByTestId("root-add-prompt").click();
+    await page.locator(".psm-pane--open").first().getByTestId("root-add-prompt").click();
     
     // Fix: Fill CONTENT
     await page.getByTestId("edit-content-input").locator("textarea").first().fill("item content");
@@ -194,7 +194,7 @@ test.describe("PSM E2E Test Suite", () => {
     await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
     await page.getByTestId("edit-save-btn").click();
 
-    const group = page.locator(".group-container", { hasText: groupName }).first();
+    const group = page.locator(".psm-node__group", { hasText: groupName }).first();
     const item = page.locator(".v-chip", { hasText: itemName }).first();
 
     // Close group to test "Open / Drop" zone
@@ -204,7 +204,7 @@ test.describe("PSM E2E Test Suite", () => {
 
     // Drag item to "Open / Drop" zone inside the group container
     await dragAndDropToZone(page, item, () => 
-      group.locator(".drop-into-zone", { hasText: "Open / Drop" }).first()
+      group.locator(".psm-node__drop-zone", { hasText: "Open / Drop" }).first()
     );
 
     // Verify group opens and contains item
@@ -213,7 +213,7 @@ test.describe("PSM E2E Test Suite", () => {
   });
 
   test("4. Keyboard Navigation (Insert, F2, ESC)", async ({ page }) => {
-    const pane = page.locator(".psm-pane-open").first();
+    const pane = page.locator(".psm-pane--open").first();
     await pane.click();
     
     const itemName = `Key_Item_${uniq}`;
@@ -255,7 +255,7 @@ test.describe("PSM E2E Test Suite", () => {
     const itemName = `Mouse_Item_${uniq}`;
     
     // Create Item
-    await page.locator(".psm-pane-open").first().getByTestId("root-add-prompt").click();
+    await page.locator(".psm-pane--open").first().getByTestId("root-add-prompt").click();
     const textarea = page.getByTestId("edit-content-input").locator("textarea").first();
     await textarea.fill("mouse content");
     await textarea.dispatchEvent("input"); // Vue model
@@ -282,24 +282,24 @@ test.describe("PSM E2E Test Suite", () => {
     const p2Name = `P2_${uniq}`;
 
     // 1. Create Group
-    await page.locator(".psm-pane-open").first().getByTestId("root-add-group").click();
+    await page.locator(".psm-pane--open").first().getByTestId("root-add-group").click();
     await page.getByTestId("edit-name-input").locator("input").fill(groupName);
     await page.getByTestId("edit-name-input").locator("input").dispatchEvent("input");
     await page.getByTestId("edit-save-btn").click();
     
-    const group = page.locator(".group-container", { hasText: groupName }).first();
+    const group = page.locator(".psm-node__group", { hasText: groupName }).first();
     await expect(group).toBeVisible();
 
     // 2. Random Group Toggle
     // Verify initial state (not random)
-    await expect(group).not.toHaveClass(/random-mode-group/);
+    await expect(group).not.toHaveClass(/psm-node__group--random/);
     
     // Toggle Switch (Find v-switch within group header)
     const randomSwitch = group.locator(".v-switch").first();
     await randomSwitch.click();
     
     // Verify Random Mode Style applied
-    await expect(group).toHaveClass(/random-mode-group/);
+    await expect(group).toHaveClass(/psm-node__group--random/);
 
     // 3. Bulk Toggle
     // Add two items
@@ -372,19 +372,24 @@ test.describe("PSM E2E Test Suite", () => {
     const dupContent = `Duplicate_${uniq}`;
 
     // Helper to add a prompt
-    const addPrompt = async (paneIdx: number, content: string) => {
-      await page.locator(".psm-pane-open").nth(paneIdx).getByTestId("root-add-prompt").click();
+    const addPrompt = async (paneTitle: string, content: string) => {
+      const pane = page.locator(".psm-pane").filter({ hasText: new RegExp(paneTitle, "i") }).first();
+      const placeholder = pane.locator(".psm-pane__placeholder--hoverable").first();
+      if (await placeholder.isVisible()) {
+        await placeholder.click();
+      }
+      await pane.getByTestId("root-add-prompt").click();
       await page.getByTestId("edit-content-input").locator("textarea").first().fill(content);
       await page.getByTestId("edit-content-input").locator("textarea").first().dispatchEvent("input");
       await page.getByTestId("edit-save-btn").click();
     };
 
     // 1. Prepare duplicates
-    await addPrompt(0, dupContent); // Positive
-    await addPrompt(1, dupContent); // Negative
+    await addPrompt("Positive", dupContent); // Positive
+    await addPrompt("Negative", dupContent); // Negative
 
     // Ensure sidebar is open
-    if (!(await page.locator(".sidebar-container").isVisible())) {
+    if (!(await page.locator(".psm-sidebar").isVisible())) {
       await page.getByTestId("toggle-sidebar-btn").click();
     }
 

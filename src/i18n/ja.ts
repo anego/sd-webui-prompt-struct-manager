@@ -8,7 +8,14 @@ export const ja = {
   applyAndClose: "反映＆閉じる (Ctrl+Shift+Enter)",
   saveDir: "保存先フォルダパス",
   save: "保存",
+  loading: "読み込み中...",
+  saving: "保存中...",
   confirmFileDelete: "本当にファイルを削除しますか？",
+  profiles: "プロファイル",
+  saveProfile: "プロファイル保存",
+  newProfileName: "プロファイル名",
+  deleteProfile: "プロファイル削除",
+  confirmProfileDelete: "本当にこのプロファイルを削除しますか？",
   
   // Context Menu
   newPromptBelow: "新規プロンプト (下)",
@@ -39,6 +46,8 @@ export const ja = {
   checkNone: "チェックしない",
   checkWarn: "警告を表示する",
   checkError: "エラーで反映を停止する",
+  showWeightSlider: "ウェイト調整スライダーを表示",
+
 
   // PsmTreePane.vue
   addPrompt: "プロンプト追加",
@@ -48,6 +57,8 @@ export const ja = {
   randomModeOn: "ランダムモード: ON (生成時に1つ選択)",
   randomModeOff: "ランダムモード: OFF (全て連結)",
   randomReflection: "グループ内ランダム反映",
+  exclusiveReflection: "グループ内排他選択 (択一)",
+
   enableAll: "グループ内すべて有効化",
   disableAll: "グループ内すべて無効化",
   openAndDrop: "開く / ドロップ",

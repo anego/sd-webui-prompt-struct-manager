@@ -11,7 +11,9 @@ This project has been tested with "Stable Diffusion WebUI reForge".
 *   **Intuitive Operation**: Reorder and move items via drag-and-drop.
 *   **Toggle Enable/Disable**: Switch items or groups ON/OFF with a single click (or Spacebar).
 *   **Bulk Toggle**: Easily enable or disable all items within a group at once using icons on the group header.
-*   **Weight Adjustment**: Adjust prompt weights using sliders.
+*   **Weight Adjustment (Compact Slider)**: Features a compact slider UI (`0.1` to `2.0`) next to each prompt chip. Reset instantly to `1.0` with the "↺" button. You can toggle the slider visibility in settings, and it remembers your choice (LocalStorage).
+*   **Exclusive Group Selection (Single-Choice Mode)**: Toggleable via the switch on the group header (teal blue). When active, enabling one item automatically disables all other sibling items in that group.
+*   **Profiles (State Snapshot)**: Save the current tree state (enable/disable, weight values) as a named profile. You can apply or delete these snapshot states instantly from the toolbar.
 *   **Random Group**: Supports Dynamic Prompts `{A|B|C}` syntax to randomly select a prompt from within the group.
 *   **Duplicate Detection**: Automatically detects duplicate prompts in the tree, highlights them, and can block generation based on settings.
 *   **Group Map**: Displays a tree structure navigation on the right side, allowing instant jumping to target groups with a click.
@@ -54,6 +56,9 @@ Once completed, your settings are saved, and you can start using the extension i
 *   **Move**: Drag and drop items to reorder them, or use the "Move to..." context menu to move them to a specific group. (Use Right Arrow/Hover to open submenu, Left Arrow to close)
 *   **Group Reorder**: Click the "▲" / "▼" buttons in the group header to reorder groups.
 *   **Toggle**: Click the checkbox on the left of an item, or select it and press `Space` to toggle enable/disable.
+*   **Exclusive Group Selection (Single-Choice)**: Click the toggle switch on the right side of the group header. When active, enabling an item within the group will automatically disable all other sibling items.
+*   **Weight Adjustment**: Drag the slider next to the prompt chip, or click the "↺" button on the right edge of the slider to reset weight to `1.0`. You can hide the slider by turning off "Show Weight Slider" in the settings (gear icon). This setting is automatically saved.
+*   **Profile Management**: Save the current state using "Save Current as Profile" from the profile dropdown on the toolbar. You can also select a saved profile to apply it, or delete it from the dropdown.
 *   **Apply & Close**: Press `Ctrl + Shift + Enter` to apply prompts to WebUI and close the panel. (Does not generate)
 
 ### Keyboard Shortcuts

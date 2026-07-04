@@ -17,6 +17,7 @@ import {
   listFiles,
   clearDuplicateHighlight,
   setDuplicateCheckMode,
+  saveSettingsLocal,
 } from "../store";
 import { useI18n } from "../composables/useI18n";
 
@@ -29,24 +30,7 @@ const emit = defineEmits<{
 
 const isRecording = ref(false);
 
-const localSearchQuery = ref(state.searchQuery);
-let debounceTimer: number | null = null;
-
 import { watch } from "vue";
-
-watch(localSearchQuery, (newVal) => {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = window.setTimeout(() => {
-    state.searchQuery = newVal;
-  }, 300);
-});
-
-// Update local if global changes externally (e.g. clear button elsewhere if any, or reset)
-watch(() => state.searchQuery, (newVal) => {
-  if (newVal !== localSearchQuery.value) {
-    localSearchQuery.value = newVal;
-  }
-});
 
 const handleRecordKey = (e: KeyboardEvent) => {
   e.preventDefault();
@@ -180,18 +164,7 @@ onUnmounted(() => {
 
         <v-divider class="mb-4"></v-divider>
 
-        <div class="text-caption text-grey mb-1">{{ t('searchFilter') }}</div>
-        <v-text-field
-          v-model="localSearchQuery"
-          density="compact"
-          variant="outlined"
-          :placeholder="t('searchPlaceholder')"
-          prepend-inner-icon="mdi-magnify"
-          clearable
-          hide-details
-          data-testid="search-input"
-          class="mb-4"
-        ></v-text-field>
+
         
 
 
@@ -208,6 +181,16 @@ onUnmounted(() => {
           <v-radio :label="t('checkWarn')" value="warn"></v-radio>
           <v-radio :label="t('checkError')" value="error"></v-radio>
         </v-radio-group>
+
+        <v-switch
+          v-model="state.showWeightSlider"
+          color="primary"
+          density="compact"
+          hide-details
+          :label="t('showWeightSlider')"
+          @update:modelValue="saveSettingsLocal"
+          class="mb-4"
+        ></v-switch>
 
         <div class="text-caption text-grey mb-1">{{ t('uiScale') }}</div>
         <v-btn-toggle

@@ -4,7 +4,7 @@
  * Positive/Negativeプロンプトのツリーを表示・操作するためのペイン領域です。
  * ヘッダー、開閉機能、およびルートアイテムへの追加ボタンを持ちます。
  */
-import { computed } from "vue";
+import { computed, ref, provide } from "vue";
 import draggable from "vuedraggable";
 import PsmNode from "./PsmNode.vue";
 import { PsmItem } from "../types";
@@ -12,6 +12,9 @@ import { addItem, savePrompts, state } from "../store";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
+
+const searchQuery = ref("");
+provide("search-query", searchQuery);
 
 const props = defineProps<{
   /** ペインタイトル (例: Positive) */
@@ -72,25 +75,27 @@ const openPane = () => emit("update:isOpen", true);
         @click="toggleOpen"
       >
         <v-icon :color="color" size="small" class="mr-2">{{ icon }}</v-icon>
-        <span class="font-weight-bold text-subtitle-2 text-truncate">{{
+        <span class="font-weight-bold text-subtitle-2 text-truncate mr-2" style="max-width: 80px;">{{
           title
         }}</span>
+
+        <v-text-field
+          v-model="searchQuery"
+          density="compact"
+          variant="solo-filled"
+          flat
+          hide-details
+          prepend-inner-icon="mdi-magnify"
+          placeholder="Filter..."
+          class="flex-grow-1 mx-2 psm-pane__search-input"
+          style="max-width: 160px; min-width: 80px;"
+          @click.stop
+          @keydown.stop
+          clearable
+        ></v-text-field>
+
         <v-spacer></v-spacer>
         <div class="d-flex ga-1">
-          <v-btn
-            size="x-small"
-            variant="text"
-            icon="mdi-file-plus"
-            @click.stop="addItem(items, false)"
-            :title="t('addPrompt')"
-          ></v-btn>
-          <v-btn
-            size="x-small"
-            variant="text"
-            icon="mdi-folder-plus"
-            @click.stop="addItem(items, true)"
-            :title="t('addGroup')"
-          ></v-btn>
           <v-btn
             size="x-small"
             variant="text"
@@ -109,10 +114,12 @@ const openPane = () => emit("update:isOpen", true);
           v-model="writableItems"
           item-key="id"
           group="psm-tree"
-          handle=".drag-handle"
-          :animation="200"
+          handle=".psm-node__drag-handle"
+          :animation="150"
+          :force-fallback="true"
+          :fallback-tolerance="3"
           class="d-flex flex-wrap align-center ga-1"
-          @start="(e: any) => { state.isDragging = true; state.draggedItem = writableItems[e.oldIndex!]; }"
+          @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = writableItems[e.oldIndex!]; }"
           @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
         >
           <template #item="{ element }">
