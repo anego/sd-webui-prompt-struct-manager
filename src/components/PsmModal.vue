@@ -51,7 +51,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleKeydown));
 
 <template>
   <Teleport to="#psm_vue_app_overlay">
-    <div v-if="modelValue" class="psm-modal__overlay" @click.stop>
+    <div v-if="modelValue" class="psm-modal__overlay">
       <div class="psm-modal__backdrop" @click="clickOutsideToClose !== false && close()"></div>
       <div class="psm-modal__content" :style="{ maxWidth: maxWidth ? `${maxWidth}px` : '600px' }">
         <slot></slot>

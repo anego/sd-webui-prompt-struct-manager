@@ -22,18 +22,23 @@ let movedPanel: HTMLElement | null = null;
  * モーダル内にポータル移動させた大辞典パネルを元の親要素の正しい位置に復元する
  */
 const restoreDictionaryPanel = () => {
-  state.hasDictionary = false;
   if (movedPanel && originalParent) {
+    state.hasDictionary = false;
     try {
-      console.debug("[PSM][EditModal/Portal] モーダル編集が終了したため、一時退避していたプロンプト大辞典パネルを元の親要素に戻します。");
+      // 大辞典のIDを元に戻す (txt2img_teleported -> txt2img)
+      const tabname = movedPanel.id.includes("img2img") ? "img2img" : "txt2img";
+      const originalId = `pd_inline_panel_${tabname}`;
+      movedPanel.id = originalId;
+
+      // 大辞典の JS が onUiUpdate で新しく生成してマウントしてしまった「偽物パネル」を削除する
+      const root = getWebUiRoot();
+      const fakePanel = root.getElementById(originalId);
+      if (fakePanel && fakePanel !== movedPanel) {
+        fakePanel.remove();
+      }
+
       // 大辞典側の自動回収処理を再度有効化
       movedPanel.removeAttribute("data-psm-teleported");
-
-      // 展開されていたら折りたたむ
-      const head = movedPanel.querySelector(".pd-inline-head") as HTMLElement | null;
-      if (head && head.getAttribute("aria-expanded") === "true") {
-        head.click();
-      }
 
       // 元の位置へ戻す
       if (originalNextSibling) {
@@ -41,10 +46,34 @@ const restoreDictionaryPanel = () => {
       } else {
         originalParent.appendChild(movedPanel);
       }
+
+      // 元の位置に戻った後（Svelte管理下に戻った段階）で、展開されていたら折りたたむ
+      const head = movedPanel.querySelector(".pd-inline-head") as HTMLElement | null;
+      if (head && head.getAttribute("aria-expanded") === "true") {
+        head.click();
+      }
     } catch (e) {
-      console.error("[PSM][EditModal/Portal] 大辞典パネルをモーダル内から元の親要素へ復帰マウントする際に例外が発生しました。", { error: e });
+      console.error("[PSM] restoreDictionaryPanel: Exception occurred during restore", { error: e });
     }
   }
+
+  // ポータルコンテナのクリーンアップ
+  try {
+    const root = getWebUiRoot();
+    const portal = root.getElementById("psm_dictionary_portal");
+    if (portal) {
+      portal.className = "psm-dictionary-portal flex-grow-1";
+      // コピーされたdata-属性を削除
+      Array.from(portal.attributes).forEach(attr => {
+        if (attr.name.startsWith("data-") && attr.name !== "data-testid") {
+          portal.removeAttribute(attr.name);
+        }
+      });
+    }
+  } catch (e) {
+    console.error("[PSM] restoreDictionaryPanel: portal cleanup failed", e);
+  }
+
   originalParent = null;
   originalNextSibling = null;
   movedPanel = null;
@@ -76,8 +105,13 @@ const moveDictionaryPanel = async () => {
   }
 
   // すでに移動済みの場合は一旦戻す（安全策）
-  // ※restoreDictionaryPanel()内で state.hasDictionary が false にリセットされるため、hasDictionary = true にする前に実行する必要がある。
-  restoreDictionaryPanel();
+  if (movedPanel) {
+    restoreDictionaryPanel();
+  }
+
+  // 大辞典のIDを一時的に書き換え、onUiUpdateによる自動引き戻しを回避する
+  const teleportedId = `pd_inline_panel_${tabname}_teleported`;
+  panel.id = teleportedId;
 
   state.hasDictionary = true;
 
@@ -88,26 +122,74 @@ const moveDictionaryPanel = async () => {
 
   // DOMがマウントされるのを待つ
   await nextTick();
-  const portal = root.getElementById("psm_dictionary_portal");
+  let portal = root.getElementById("psm_dictionary_portal");
+  if (!portal) {
+    // Vuetifyのモーダル展開ラグに配慮した最大500msのリトライ検出
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      portal = root.getElementById("psm_dictionary_portal");
+      if (portal) break;
+    }
+  }
+
   if (portal) {
+    portal.innerHTML = ""; // ポータル内のゴミ要素を完全クリア
+
+    // 元の親のクラス名、データ属性をポータルコンテナに動的にコピーする
+    // (大辞典やWebUIのCSSが特定の親ハッシュクラスやID依存で定義されている場合の崩れを防ぐ)
+    if (originalParent) {
+      portal.className = `psm-dictionary-portal flex-grow-1 ${originalParent.className || ""}`;
+      Array.from(originalParent.attributes).forEach(attr => {
+        if (attr.name.startsWith("data-") && attr.name !== "data-v-") {
+          portal.setAttribute(attr.name, attr.value);
+        }
+      });
+      if (originalParent.id) {
+        portal.setAttribute("data-psm-original-parent-id", originalParent.id);
+      }
+    }
+
     // 大辞典側の自動マウント回収処理を一時的にスキップさせるための目印を付与
     panel.setAttribute("data-psm-teleported", "true");
     
     portal.appendChild(panel);
-    console.debug(`[PSM][EditModal/Portal] 2カラム表示を構成するため、プロンプト大辞典パネル（アクティブタブ: ${tabname}）を編集モーダル内のポータルへ退避マウントしました。`);
-    
-    // 詳細情報をデバッグログとして折りたたんでグループ表示
-    console.groupCollapsed(`[PSM][EditModal/Portal] ポータル移動が行われたDOM構造の詳細を展開します。`);
-    console.debug("[PSM][EditModal/Portal] ポータル退避対象となった大辞典パネルのDOM要素構造です。");
-    console.dir(panel);
-    console.debug("[PSM][EditModal/Portal] 退避前に大辞典パネルがマウントされていた親DOM要素の構造です。");
-    console.dir(originalParent);
-    console.groupEnd();
-    
-    // パネルが閉じていれば自動展開する
+
+    // ブラウザのレイアウト計算（Reflow）と露出状態の確定を待ってから展開・ロードを開始する (50ms待機)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // 大辞典側の露出検知（IntersectionObserverやスクロール監視）を強制起動させるためのダミーイベントをディスパッチ
+    try {
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("scroll"));
+      portal.dispatchEvent(new Event("scroll", { bubbles: true }));
+      panel.dispatchEvent(new Event("scroll", { bubbles: true }));
+    } catch (e) {
+      console.error("[PSM] moveDictionaryPanel: Failed to dispatch dummy events", e);
+    }
+
+    // 移動後の露出状態で、大辞典のアコーディオンが閉じていたら展開をクリックする
     const head = panel.querySelector(".pd-inline-head") as HTMLElement | null;
-    if (head && head.getAttribute("aria-expanded") !== "true") {
+    const isExpanded = head && head.getAttribute("aria-expanded") === "true";
+    if (head && !isExpanded) {
       head.click();
+    }
+
+    // アタッチされたポータル内で、APIからのデータロード完了を監視して待機する
+    let loaded = false;
+    for (let i = 0; i < 60; i++) { // 最大3秒 (50ms * 60)
+      const viewType = panel.getAttribute("data-pd-view-type");
+      const isBusy = panel.getAttribute("aria-busy") === "true";
+      // 読み込み中 (loading) でなく、かつ busy 状態でない場合にロード完了とみなす
+      if (viewType && viewType !== "loading" && !isBusy) {
+        loaded = true;
+        break;
+      }
+      // 定期的にスクロールイベントを再送して露出判定を刺激する (500msごと)
+      if (i > 0 && i % 10 === 0) {
+        window.dispatchEvent(new Event("scroll"));
+        portal.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
 };
@@ -139,40 +221,33 @@ watch(
   async (val) => {
     if (val) {
       // モーダルが開く前に大辞典の存在を事前検知し、モーダルの初期幅を決定する
-      if (checkDictionaryPresence()) {
-        state.hasDictionary = true;
-        console.debug("[PSM][EditModal/Layout] 編集対象がプロンプトであり、かつ大辞典パネルが存在するため、2カラムレイアウトでモーダルを起動します。");
-      } else {
-        state.hasDictionary = false;
-      }
+      state.hasDictionary = checkDictionaryPresence();
 
       await nextTick();
-      // v-ifの反映待ち
       const item = state.editingItem;
       if (item) {
         if (item.is_group) {
           nameInputRef.value?.focus();
           restoreDictionaryPanel(); // グループ編集時は念のため復元
         } else {
-          // テキスト入力が存在する場合
           if (contentInputRef.value) {
             contentInputRef.value.focus();
-            
-            // Try to attach a1111-sd-webui-tagcomplete
-            setTimeout(() => {
-              try {
-                const textAreaEl = contentInputRef.value?.$el.querySelector('textarea');
-                if (textAreaEl && window.addAutocompleteToArea) {
-                  window.addAutocompleteToArea(textAreaEl);
-                }
-              } catch (e) {
-                console.debug("[PSM][EditModal/Autocomplete] tag-completeの初期化に失敗、または該当要素がありません。自動補完のアタッチをスキップします。", { error: e });
-              }
-            }, 100);
-
-            // ポータル移動をDOMマウント後に即座に実行する (遅延を排除)
-            await moveDictionaryPanel();
           }
+          
+          // Try to attach a1111-sd-webui-tagcomplete
+          setTimeout(() => {
+            try {
+              const textAreaEl = contentInputRef.value?.$el.querySelector('textarea');
+              if (textAreaEl && window.addAutocompleteToArea) {
+                window.addAutocompleteToArea(textAreaEl);
+              }
+            } catch (e) {
+              console.debug("[PSM][EditModal/Autocomplete] tag-completeの初期化に失敗、または該当要素がありません。自動補完のアタッチをスキップします。", { error: e });
+            }
+          }, 100);
+
+          // ポータル移動をDOMマウント後に即座に実行する (遅延を排除、テキストエリアの有無に関わらず実行)
+          await moveDictionaryPanel();
         }
       }
     } else {
@@ -345,15 +420,16 @@ const modalTitle = computed(() => {
           <!-- 右カラム: 大辞典ポータル -->
           <div 
             v-show="state.hasDictionary" 
-            class="flex-grow-1 pa-4 border-s overflow-y-auto d-flex flex-column bg-grey-darken-4"
-            style="max-width: 550px; width: 550px;"
+            class="flex-grow-1 overflow-hidden d-flex flex-column"
+            :class="{ 'pa-4 border-s bg-grey-darken-4': state.hasDictionary }"
+            :style="state.hasDictionary ? 'max-width: 550px; width: 550px;' : 'max-width: 0; width: 0; padding: 0 !important; border: none !important;'"
           >
             <div class="text-subtitle-2 mb-2 text-grey-lighten-1 d-flex align-center ga-1">
               <v-icon size="small" color="primary">mdi-book-open-variant</v-icon>
               <span>プロンプト大辞典 (Portal)</span>
             </div>
             <!-- Portal Placeholder -->
-            <div id="psm_dictionary_portal" v-pre class="psm-dictionary-portal flex-grow-1"></div>
+            <div id="psm_dictionary_portal" v-pre class="psm-dictionary-portal flex-grow-1" style="min-height: 0;"></div>
           </div>
         </div>
       </v-card-text>
@@ -403,7 +479,10 @@ const modalTitle = computed(() => {
 .psm-dictionary-portal {
   width: 100%;
   height: 100%;
-  overflow: visible;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 </style>
 
@@ -411,5 +490,83 @@ const modalTitle = computed(() => {
 /* Ensure the input slot doesn't clip the overflow (Vuetify internal override) */
 div.psm-edit-modal__textarea--lifted .v-field__input {
     overflow: visible;
+}
+
+/* ポータル移動された大辞典のグローバルスタイル (Vuetifyのv-dialogテレポートによるScopedハッシュ無効化への完全対応) */
+.psm-dictionary-portal {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#pd_inline_panel_txt2img_teleported,
+#pd_inline_panel_img2img_teleported {
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-grow: 1 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+#pd_inline_panel_txt2img_teleported .pd-inline-head,
+#pd_inline_panel_img2img_teleported .pd-inline-head {
+  flex-shrink: 0 !important;
+  min-height: 38px !important;
+  height: 38px !important;
+  color: var(--body-text-color, #f0f0f0) !important;
+  background: var(--button-secondary-background-fill, rgba(255, 255, 255, 0.08)) !important;
+  border: 1px solid var(--border-color-primary, rgba(255, 255, 255, 0.15)) !important;
+  border-radius: 6px !important;
+  padding: 0 12px !important;
+  margin: 0 0 8px 0 !important;
+  display: grid !important;
+  align-items: center !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  box-sizing: border-box !important;
+}
+
+#pd_inline_panel_txt2img_teleported .pd-inline-head .pd-inline-label,
+#pd_inline_panel_txt2img_teleported .pd-inline-head .pd-inline-status,
+#pd_inline_panel_txt2img_teleported .pd-inline-head .pd-inline-chevron,
+#pd_inline_panel_img2img_teleported .pd-inline-head .pd-inline-label,
+#pd_inline_panel_img2img_teleported .pd-inline-head .pd-inline-status,
+#pd_inline_panel_img2img_teleported .pd-inline-head .pd-inline-chevron {
+  color: var(--body-text-color, #f0f0f0) !important;
+}
+
+#pd_inline_panel_txt2img_teleported .pd-inline-body,
+#pd_inline_panel_img2img_teleported .pd-inline-body {
+  position: static !important; /* ドロップダウン用の absolute 配置を強制解除 */
+  top: auto !important;        /* はみ出し位置指定を完全リセット */
+  display: flex !important;
+  flex-direction: column !important;
+  flex-grow: 1 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#pd_inline_panel_txt2img_teleported .pd-inline-query-row,
+#pd_inline_panel_img2img_teleported .pd-inline-query-row {
+  flex-shrink: 0 !important;
+}
+
+#pd_inline_panel_txt2img_teleported .pd-inline-results,
+#pd_inline_panel_img2img_teleported .pd-inline-results {
+  display: block !important;
+  height: auto !important;
+  overflow-y: auto !important;
+  flex-grow: 1 !important;
+  min-height: 0 !important;
 }
 </style>
