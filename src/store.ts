@@ -87,6 +87,16 @@ export const state = reactive({
   isTranslating: false,
   /** バッチ翻訳の進捗 (タグ名の日本語化用) */
   translateProgress: { done: 0, total: 0 },
+  /** 移動先クイック選択ダイアログの表示状態 */
+  isMoveDialogOpen: false,
+  /** 移動対象のアイテム */
+  moveDialogItem: null as PsmItem | null,
+  /** 最近使った移動先 (localStorageに保存) */
+  recentMoveTargets: [] as { id: number | string; path: string }[],
+  /** ドラッグ中にドロップ先としてハイライトするグループID */
+  dropTargetId: null as number | null,
+  /** ドラッグ元のリスト参照 (クローン方式のため、ドロップ後に元を削除するのに使う) */
+  draggedFromList: null as PsmItem[] | null,
   /** ローディング多重度カウンタ */
   loadingCount: 0,
 });
@@ -753,6 +763,9 @@ export const loadSettingsLocal = () => {
       if (data.toggle_shortcut) state.toggleShortcut = data.toggle_shortcut;
       if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
       if (data.show_weight_slider !== undefined) state.showWeightSlider = data.show_weight_slider;
+      if (Array.isArray(data.recent_move_targets)) {
+        state.recentMoveTargets = data.recent_move_targets.slice(0, RECENT_MOVE_LIMIT);
+      }
     } catch (e) {
       Logger.error("[Store/Settings] ローカル設定（LocalStorage）の読み込みに失敗しました。", e);
     }
@@ -768,6 +781,7 @@ export const saveSettingsLocal = () => {
     toggle_shortcut: state.toggleShortcut,
     duplicate_check_mode: state.duplicateCheckMode,
     show_weight_slider: state.showWeightSlider,
+    recent_move_targets: state.recentMoveTargets,
   };
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 };
@@ -2057,6 +2071,151 @@ export const setAllGroupsOpen = (open: boolean) => {
 };
 
 
+
+// -------------------------------------------------------------------------
+// 移動先クイック選択 (グループが多い環境での移動を高速化する)
+// -------------------------------------------------------------------------
+
+export interface MoveTarget {
+  /** ルートは "root-pos" / "root-neg"、グループはそのID */
+  id: number | string;
+  /** グループ名 */
+  name: string;
+  /** 親からのパス表示 (例: "Positive > キャラクター") */
+  path: string;
+  /** 移動先の配列 (この配列へpushする) */
+  list: PsmItem[];
+  /** 階層の深さ */
+  level: number;
+}
+
+/** 最近使った移動先の保持数 */
+const RECENT_MOVE_LIMIT = 5;
+
+/**
+ * 移動先の候補を収集する (循環参照を防ぐため、自分自身とその子孫は除外)
+ * @param item 移動するアイテム
+ * @param rootLabels ルートの表示名 (i18n解決済みの文字列を渡す)
+ */
+export const collectMoveTargets = (
+  item: PsmItem,
+  rootLabels: { positive: string; negative: string }
+): MoveTarget[] => {
+  const targets: MoveTarget[] = [
+    { id: "root-pos", name: rootLabels.positive, path: rootLabels.positive, list: state.positive, level: 0 },
+    { id: "root-neg", name: rootLabels.negative, path: rootLabels.negative, list: state.negative, level: 0 },
+  ];
+
+  const collect = (nodes: PsmItem[], level: number, parentPath: string) => {
+    for (const node of nodes) {
+      if (!node || node.id === item.id) continue; // 自分自身とその子孫は除外
+      if (node.is_group) {
+        const name = node.name || "(No Name)";
+        const path = `${parentPath} > ${name}`;
+        targets.push({ id: node.id, name, path, list: node.children || [], level });
+        if (node.children) collect(node.children, level + 1, path);
+      }
+    }
+  };
+
+  collect(state.positive, 0, rootLabels.positive);
+  collect(state.negative, 0, rootLabels.negative);
+  return targets;
+};
+
+/** 最近使った移動先を先頭へ追加して保存する (重複は繰り上げ。読み込みは loadSettingsLocal 側) */
+export const pushRecentMoveTarget = (target: MoveTarget) => {
+  const entry = { id: target.id, path: target.path };
+  state.recentMoveTargets = [
+    entry,
+    ...state.recentMoveTargets.filter((r) => r.id !== target.id),
+  ].slice(0, RECENT_MOVE_LIMIT);
+  saveSettingsLocal();
+};
+
+/** 移動ダイアログを開く */
+export const openMoveDialog = (item: PsmItem) => {
+  state.moveDialogItem = item;
+  state.isMoveDialogOpen = true;
+};
+
+/** 移動ダイアログを閉じる */
+export const closeMoveDialog = () => {
+  state.isMoveDialogOpen = false;
+  state.moveDialogItem = null;
+};
+
+/** 選択された移動先へアイテムを移動する */
+export const executeMoveTo = async (target: MoveTarget) => {
+  const item = state.moveDialogItem;
+  if (!item) return;
+  pushRecentMoveTarget(target);
+  closeMoveDialog();
+  await teleportItem(item, target.list, "move-dialog");
+};
+
+// -------------------------------------------------------------------------
+// ドラッグ&ドロップ (クローン方式) の共通処理
+// -------------------------------------------------------------------------
+
+/** ドラッグ開始: 対象アイテムと元のリストを記録する */
+export const beginDrag = (list: PsmItem[], index?: number) => {
+  state.isDragging = true;
+  state.draggedItem = typeof index === "number" ? list[index] : null;
+  state.draggedFromList = list;
+};
+
+/** ドラッグ終了: 状態をリセットする (保存は呼び出し側) */
+export const endDrag = () => {
+  state.isDragging = false;
+  state.draggedItem = null;
+  state.draggedFromList = null;
+  state.dropTargetId = null;
+};
+
+/**
+ * 別リストへドロップされた際に、移動元から元のアイテムを削除して移動を確定する
+ *
+ * クローン方式 (pull: "clone") では移動元から自動削除されないため、
+ * ドロップ先への追加後にこの処理で元を取り除く。
+ * 同一リスト内の並べ替えでは何もしない (SortableJSが順序を更新済み)。
+ *
+ * @param destList ドロップ先のリスト (vuedraggableが既に追加済み)
+ * @returns 移動元から削除したかどうか
+ */
+export const finalizeCrossListMove = (destList: PsmItem[]): boolean => {
+  const src = state.draggedFromList;
+  const item = state.draggedItem;
+  if (!src || !item || src === destList) return false;
+
+  // 自分自身の配下への移動は循環参照になるため、追加を取り消す
+  if (isDescendantList(item, destList)) {
+    const dup = destList.findIndex((n) => n && n.id === item.id);
+    if (dup !== -1) destList.splice(dup, 1);
+    Logger.warn("[Store/Drag] 自身の配下へは移動できないため、移動を取り消しました。");
+    return false;
+  }
+
+  const idx = src.findIndex((n) => n && n.id === item.id);
+  if (idx === -1) {
+    // 想定外: 移動元に見つからない場合は二重登録を避けるため追加分を取り消す
+    const dup = destList.findIndex((n) => n && n.id === item.id);
+    if (dup !== -1) destList.splice(dup, 1);
+    Logger.warn("[Store/Drag] 移動元にアイテムが見つからなかったため、移動を取り消しました。", item);
+    return false;
+  }
+
+  src.splice(idx, 1);
+  state.selectedProfileName = "";
+  return true;
+};
+
+/** 指定のリストが、そのアイテムの子孫のリストかどうかを判定する (循環参照チェック用) */
+const isDescendantList = (item: PsmItem, list: PsmItem[]): boolean => {
+  if (!item.is_group || !item.children) return false;
+  if (item.children === list) return true;
+  return item.children.some((c) => c && isDescendantList(c, list));
+};
 
 export const teleportItem = async (item: PsmItem, dest: PsmItem[], type: string) => {
   const walk = (nodes: PsmItem[]): boolean => {

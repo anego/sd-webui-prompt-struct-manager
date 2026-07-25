@@ -130,6 +130,30 @@ html body .psm-loading-overlay {
   pointer-events: auto; /* 背後の操作をブロックする */
 }
 
+/* -------------------------------------------------------------------------- */
+/* Drag & Drop feedback (SortableJS)                                          */
+/* ドラッグ中のクローンは fallbackOnBody により body 直下へ出るため、          */
+/* スコープ付きCSSではなくグローバルに定義する                                 */
+/* -------------------------------------------------------------------------- */
+html body .psm-drag-ghost {
+  opacity: 0.4;
+  background-color: rgba(33, 150, 243, 0.25) !important;
+  outline: 2px dashed rgba(33, 150, 243, 0.8);
+  outline-offset: -2px;
+}
+
+html body .psm-drag-chosen {
+  opacity: 0.9;
+}
+
+html body .psm-drag-active {
+  z-index: $z-index-modal; /* ドラッグ中のクローンを最前面に表示する */
+  opacity: 0.95;
+  transform: scale(1.03);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
 /* Global Vuetify Overlay fixes */
 html body .v-overlay-container,
 html body .psm-app-root .v-overlay-container {

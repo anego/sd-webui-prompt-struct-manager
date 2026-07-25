@@ -35,6 +35,7 @@ import PsmDuplicateConfirmDialog from "./components/PsmDuplicateConfirmDialog.vu
 import PsmSetupWizard from "./components/PsmSetupWizard.vue";
 import PsmPreviewModal from "./components/PsmPreviewModal.vue";
 import PsmInfotextDialog from "./components/PsmInfotextDialog.vue";
+import PsmMoveDialog from "./components/PsmMoveDialog.vue";
 import { useI18n } from "./composables/useI18n";
 
 const { t } = useI18n();
@@ -648,6 +649,8 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
       />
 
       <PsmInfotextDialog v-model="dialogs.infotext" />
+
+      <PsmMoveDialog />
 
       <PsmContextMenu
         v-model:show="contextMenu.show"

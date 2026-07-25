@@ -15,7 +15,11 @@ import {
   estimateTokenCount,
   getCompiledPrompts,
   CLIP_CHUNK_SIZE,
+  beginDrag,
+  endDrag,
+  finalizeCrossListMove,
 } from "../store";
+import { DRAG_OPTIONS } from "../dragOptions";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -139,14 +143,11 @@ const openPane = () => emit("update:isOpen", true);
         <draggable
           v-model="writableItems"
           item-key="id"
-          group="psm-tree"
-          handle=".psm-node__drag-handle"
-          :animation="150"
-          :force-fallback="true"
-          :fallback-tolerance="3"
+          v-bind="DRAG_OPTIONS"
           class="d-flex flex-wrap align-center ga-1"
-          @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = writableItems[e.oldIndex!]; }"
-          @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
+          @start="(e: { oldIndex?: number }) => beginDrag(writableItems, e.oldIndex)"
+          @end="() => { endDrag(); savePrompts(); }"
+          @add="() => { finalizeCrossListMove(writableItems); savePrompts(); }"
         >
           <template #item="{ element }">
             <PsmNode :item="element" :parentChildren="writableItems" />

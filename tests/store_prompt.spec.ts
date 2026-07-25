@@ -1125,6 +1125,273 @@ describe("importInfotext - 取込の適用", () => {
 });
 
 // -------------------------------------------------------------------------
+// 15. ドラッグ&ドロップ (クローン方式) のテスト
+// -------------------------------------------------------------------------
+import { beginDrag, endDrag, finalizeCrossListMove } from "../src/store";
+
+describe("ドラッグ&ドロップ (クローン方式)", () => {
+  const leaf = (id: number, name: string): PsmItem => ({
+    id, name, content: "tag", enabled: true, weight: 1, is_group: false,
+  });
+  const grp = (id: number, name: string, children: PsmItem[] = []): PsmItem => ({
+    id, name, content: "", enabled: true, weight: 1, is_group: true, children,
+  });
+
+  beforeEach(() => {
+    endDrag();
+  });
+
+  it("15.1 beginDrag: 対象アイテムと移動元リストを記録すること", () => {
+    const list = [leaf(1, "a"), leaf(2, "b")];
+    beginDrag(list, 1);
+    expect(state.isDragging).toBe(true);
+    expect(state.draggedItem).toBe(list[1]);
+    expect(state.draggedFromList).toBe(list);
+  });
+
+  it("15.2 endDrag: 状態がすべてリセットされること", () => {
+    beginDrag([leaf(1, "a")], 0);
+    state.dropTargetId = 99;
+    endDrag();
+    expect(state.isDragging).toBe(false);
+    expect(state.draggedItem).toBeNull();
+    expect(state.draggedFromList).toBeNull();
+    expect(state.dropTargetId).toBeNull();
+  });
+
+  it("15.3 finalizeCrossListMove: 別リストへのドロップ後、移動元から削除されること", () => {
+    // Arrange: クローン方式のため、ドロップ先には既に同じアイテムが追加されている状態
+    const item = leaf(1, "移動対象");
+    const src = [item, leaf(2, "残る")];
+    const dest = [leaf(3, "既存"), item];
+    beginDrag(src, 0);
+
+    // Act
+    const moved = finalizeCrossListMove(dest);
+
+    // Assert: 移動元から消え、ドロップ先には残る (二重登録にならない)
+    expect(moved).toBe(true);
+    expect(src.map((i) => i.id)).toEqual([2]);
+    expect(dest.map((i) => i.id)).toEqual([3, 1]);
+  });
+
+  it("15.4 finalizeCrossListMove: 同一リスト内の並べ替えでは何もしないこと", () => {
+    // Arrange: SortableJSが順序を更新済みのケース
+    const list = [leaf(2, "b"), leaf(1, "a")];
+    beginDrag(list, 1);
+
+    // Act
+    const moved = finalizeCrossListMove(list);
+
+    // Assert
+    expect(moved).toBe(false);
+    expect(list.map((i) => i.id)).toEqual([2, 1]);
+  });
+
+  it("15.5 finalizeCrossListMove: 自身の配下への移動は取り消されること (循環参照防止)", () => {
+    // Arrange: グループを自分の子リストへドロップしようとしたケース
+    const inner = grp(20, "子");
+    const dragged = grp(10, "親", [inner]);
+    const src = [dragged];
+    beginDrag(src, 0);
+    // ドロップ先(自身の子リスト)へ既に追加された状態を再現
+    dragged.children!.push(dragged);
+
+    // Act
+    const moved = finalizeCrossListMove(dragged.children!);
+
+    // Assert: 追加が取り消され、移動元も変化しない
+    expect(moved).toBe(false);
+    expect(dragged.children!.map((c) => c.id)).toEqual([20]);
+    expect(src.map((i) => i.id)).toEqual([10]);
+  });
+
+  it("15.6 finalizeCrossListMove: 孫の階層への移動も循環参照として取り消されること", () => {
+    // Arrange
+    const grandChild = grp(30, "孫");
+    const child = grp(20, "子", [grandChild]);
+    const dragged = grp(10, "親", [child]);
+    beginDrag([dragged], 0);
+    grandChild.children!.push(dragged);
+
+    // Act
+    const moved = finalizeCrossListMove(grandChild.children!);
+
+    // Assert
+    expect(moved).toBe(false);
+    expect(grandChild.children!.length).toBe(0);
+  });
+
+  it("15.7 finalizeCrossListMove: 移動元に見つからない場合は二重登録を避けて取り消すこと", () => {
+    // Arrange: 想定外の状態 (移動元に該当アイテムがない)
+    const item = leaf(1, "対象");
+    const src = [leaf(2, "別")];
+    const dest = [item];
+    beginDrag(src, 0);
+    state.draggedItem = item; // 移動元に存在しないアイテムを対象にする
+
+    // Act
+    const moved = finalizeCrossListMove(dest);
+
+    // Assert: ドロップ先からも取り除かれ、重複が発生しない
+    expect(moved).toBe(false);
+    expect(dest.length).toBe(0);
+  });
+
+  it("15.8 finalizeCrossListMove: ドラッグ情報がない場合は何もしないこと", () => {
+    endDrag();
+    const dest = [leaf(1, "a")];
+    expect(finalizeCrossListMove(dest)).toBe(false);
+    expect(dest.length).toBe(1);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 14. 移動先クイック選択のテスト
+// -------------------------------------------------------------------------
+import {
+  collectMoveTargets,
+  pushRecentMoveTarget,
+  openMoveDialog,
+  closeMoveDialog,
+  executeMoveTo,
+  MoveTarget,
+} from "../src/store";
+
+describe("移動先クイック選択", () => {
+  const labels = { positive: "Positive", negative: "Negative" };
+  const leaf = (name: string): PsmItem => ({
+    id: Math.random() * 1e9 | 0, name, content: "tag", enabled: true, weight: 1, is_group: false,
+  });
+  const grp = (id: number, name: string, children: PsmItem[] = []): PsmItem => ({
+    id, name, content: "", enabled: true, weight: 1, is_group: true, children,
+  });
+
+  beforeEach(() => {
+    state.recentMoveTargets = [];
+    state.isMoveDialogOpen = false;
+    state.moveDialogItem = null;
+  });
+
+  it("14.1 collectMoveTargets: ルート2件とすべてのグループを収集し、親パスを付与すること", () => {
+    // Arrange
+    const child = grp(20, "子グループ");
+    state.positive = [grp(10, "親グループ", [child])];
+    state.negative = [grp(30, "ネガ用")];
+    const item = leaf("移動対象");
+
+    // Act
+    const targets = collectMoveTargets(item, labels);
+
+    // Assert
+    expect(targets.map((t) => t.path)).toEqual([
+      "Positive",
+      "Negative",
+      "Positive > 親グループ",
+      "Positive > 親グループ > 子グループ",
+      "Negative > ネガ用",
+    ]);
+    // 移動先リストは実際の配列参照であること
+    expect(targets[2].list).toBe(state.positive[0].children);
+  });
+
+  it("14.2 collectMoveTargets: 自分自身は候補から除外されること (循環参照防止)", () => {
+    // Arrange: 自分自身がグループのケース
+    const self = grp(10, "自分自身", [grp(20, "自分の子")]);
+    state.positive = [self, grp(30, "別グループ")];
+    state.negative = [];
+
+    // Act
+    const targets = collectMoveTargets(self, labels);
+
+    // Assert: 自分自身は含まれない
+    expect(targets.find((t) => t.id === 10)).toBeUndefined();
+    expect(targets.find((t) => t.id === 30)).toBeDefined();
+  });
+
+  it("14.3 collectMoveTargets: 名前が空のグループは (No Name) と表示すること", () => {
+    state.positive = [grp(10, "")];
+    state.negative = [];
+    const targets = collectMoveTargets(leaf("x"), labels);
+    expect(targets[2].name).toBe("(No Name)");
+  });
+
+  it("14.4 pushRecentMoveTarget: 先頭へ追加され、重複は繰り上げ、5件で打ち切られること", () => {
+    // Arrange
+    const mk = (id: number): MoveTarget => ({ id, name: `g${id}`, path: `P > g${id}`, list: [], level: 0 });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+
+    // Act: 6件追加
+    for (let i = 1; i <= 6; i++) pushRecentMoveTarget(mk(i));
+
+    // Assert: 最新が先頭、5件で打ち切り
+    expect(state.recentMoveTargets.map((r) => r.id)).toEqual([6, 5, 4, 3, 2]);
+
+    // Act: 既存を再追加すると先頭へ繰り上がる
+    pushRecentMoveTarget(mk(3));
+    expect(state.recentMoveTargets.map((r) => r.id)).toEqual([3, 6, 5, 4, 2]);
+    // localStorageへ保存されること
+    expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+      "psm_settings",
+      expect.stringContaining("recent_move_targets")
+    );
+  });
+
+  it("14.5 openMoveDialog / closeMoveDialog: 状態が正しく切り替わること", () => {
+    const item = leaf("対象");
+    openMoveDialog(item);
+    expect(state.isMoveDialogOpen).toBe(true);
+    expect(state.moveDialogItem).toBe(item);
+
+    closeMoveDialog();
+    expect(state.isMoveDialogOpen).toBe(false);
+    expect(state.moveDialogItem).toBeNull();
+  });
+
+  it("14.6 executeMoveTo: 移動を実行し、最近使った移動先へ記録してダイアログを閉じること", async () => {
+    // Arrange
+    state.selectedFile = "f.yaml";
+    const item = leaf("移動対象");
+    const dest = grp(10, "移動先");
+    state.positive = [item, dest];
+    state.negative = [];
+    openMoveDialog(item);
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+
+    const target: MoveTarget = { id: 10, name: "移動先", path: "Positive > 移動先", list: dest.children!, level: 0 };
+
+    // Act
+    await executeMoveTo(target);
+
+    // Assert
+    expect(dest.children!.map((c) => c.name)).toEqual(["移動対象"]);
+    expect(state.positive.includes(item)).toBe(false); // 元の位置から除去
+    expect(state.recentMoveTargets[0].id).toBe(10);
+    expect(state.isMoveDialogOpen).toBe(false);
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+
+  it("14.7 executeMoveTo: 対象アイテムが無い場合は何もしないこと", async () => {
+    closeMoveDialog();
+    await executeMoveTo({ id: 1, name: "x", path: "x", list: [], level: 0 });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("14.8 loadSettingsLocal: 最近使った移動先が復元されること", () => {
+    // Arrange
+    mockLocalStorage.getItem.mockReturnValueOnce(JSON.stringify({
+      recent_move_targets: [{ id: 7, path: "Positive > 服装" }],
+    }));
+
+    // Act
+    loadSettingsLocal();
+
+    // Assert
+    expect(state.recentMoveTargets).toEqual([{ id: 7, path: "Positive > 服装" }]);
+  });
+});
+
+// -------------------------------------------------------------------------
 // 13. サブ分類の任意実行とAI分類のテスト
 // -------------------------------------------------------------------------
 import {

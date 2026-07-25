@@ -6,7 +6,13 @@
 - **Positive / Negative:** Manage prompts in two independent trees.
 - **Grouping:** Create folders to categorize prompts.
 - **Infinite Nesting:** Create groups within groups (no depth limit).
-- **Reorder:** Drag-and-drop handles (two columns of dots) are added to the left of groups and prompts for precise and intuitive reordering.
+- **Reorder (Drag & Drop):** Drag handles (two columns of dots) are added to the left of groups and prompts for reordering and moving between levels.
+  - **Unified on SortableJS.** Because PSM is mounted inside the `gradio-app` shadowRoot, HTML5 native DnD is unreliable; previously non-functional native handlers were mixed in. Shared settings now live in `src/dragOptions.ts`.
+  - **Source layout is preserved (clone mode):** With `pull: "clone"`, the item is not removed from its source list while dragging to another group. With the default behavior the source collapses immediately, shifting the layout upward so the intended drop target escapes the cursor. Removal from the source happens after the drop is committed, and moves into the item's own descendants (cycles) or duplicate insertions are automatically reverted.
+  - Drop-accuracy settings: `fallbackOnBody` (prevents clipping inside scroll containers), `emptyInsertThreshold` (easier drops into collapsed groups), `swapThreshold` / `invertSwap` (stabilizes insertion in wrapping layouts), and `scroll` (auto-scroll while dragging).
+  - **Visual feedback:** The dragged item lifts up, the insertion point is shown as a ghost, and the target group is outlined with a dashed border.
+  - **Auto-expand:** Hovering a collapsed group name while dragging expands it after ~0.4s. Collapsed groups show a dedicated drop zone; dropping there appends into that group.
+  - **Dropping into empty/narrow groups:** Empty groups normally have almost no height, making them impossible to target. While dragging, child areas are given a minimum height, and empty groups in particular are rendered as a dashed drop area with an "Add to ..." hint label.
 - **Long Text Protection (Edit Icon Protection):** When prompt names or contents are extremely long, the maximum width of the chip text is automatically scaled down (110px) and the flex-shrink properties are optimized to keep the edit (pencil) icon visible and clickable.
 
 ### 1.2 Prompt Editing & Adjustment
@@ -95,6 +101,13 @@
 ### 2.5 Mouse Operations
 - **Double-click Edit:** Quickly open the edit mode (modal) by double-clicking on a group or prompt item.
 - **Context Menu:** Right-clicking on an item opens a context menu for advanced operations (Duplicate, Delete, Move, etc.).
+
+### 2.7 Quick Move-To
+- **Searchable dialog:** "Move to..." in the context menu opens a dialog where destinations can be filtered by typing, so you can reach the right group in a few keystrokes even with many groups (replaces the previous submenu).
+- **Recent destinations:** The last 5 destinations are pinned to the top of the list — useful when repeatedly moving items to the same place. Stored in LocalStorage.
+- **Parent path display:** Each candidate shows its path (e.g. `Positive > Character > Clothing`), making same-named groups distinguishable.
+- **Keyboard:** The search field is focused on open; use `↑` `↓` to select, `Enter` to move, `Esc` to close.
+- **Cycle prevention:** The item being moved is excluded from the candidate list.
 
 ### 2.6 Search Filter
 - **Pane-Independent Filter:** The shared global search filter in the sidebar has been removed, and independent search filters have been added inside the Positive and Negative pane headers.

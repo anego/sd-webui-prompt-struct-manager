@@ -35,12 +35,23 @@ async function startDrag(page: Page, source: Locator) {
   await page.locator(".psm-node__drop-zone").first().waitFor({ state: "visible", timeout: 2000 });
 }
 
+/**
+ * ドロップゾーンへドラッグ&ドロップする
+ *
+ * 注意: DnDはSortableJSのフォールバック(マウス駆動)モードに統一されているため、
+ * 合成dropイベントでは動作しない。実際のマウス移動でドロップする必要がある。
+ */
 async function dragAndDropToZone(page: Page, source: Locator, zoneLocatorFunc: () => Locator) {
   await startDrag(page, source);
 
   const zone = zoneLocatorFunc();
   await zone.waitFor({ state: "visible", timeout: 3000 });
-  await zone.dispatchEvent("drop", { bubbles: true });
+  const box = await zone.boundingBox();
+  if (!box) throw new Error("Drop zone not found");
+
+  // ゾーン中央へ段階的に移動 (SortableJSが移動を検知できるようstepsを指定)
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
+  await page.waitForTimeout(200);
 
   await page.mouse.up();
   await page.waitForTimeout(500);
