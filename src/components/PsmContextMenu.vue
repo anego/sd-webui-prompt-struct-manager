@@ -197,7 +197,8 @@ watch(localShow, async (val) => {
     :z-index="20000000"
     content-class="psm-context-menu-content"
   >
-    <v-list density="compact" width="220" elevation="24">
+    <!-- 項目名が省略されないよう min-width で余裕を持たせる (固定widthだと日本語ラベルが切れる) -->
+    <v-list density="compact" min-width="280" elevation="24">
       <!-- 新規追加 -->
       <v-list-item
         prepend-icon="mdi-file-plus"
@@ -248,21 +249,22 @@ watch(localShow, async (val) => {
 
       <!-- サブ分類でグループ化 (グループのみ) -->
       <template v-if="targetItem?.is_group">
+        <!-- 説明は subtitle ではなくツールチップに置き、メニュー幅を圧迫しない -->
         <v-list-item
           prepend-icon="mdi-file-tree"
-          :title="t('subdivideGroup')"
-          :subtitle="t('subdivideGroupHint')"
           @click="onSubdivide(false)"
           data-testid="ctx-subdivide"
-        ></v-list-item>
+        >
+          <v-list-item-title :title="t('subdivideGroupHint')">{{ t('subdivideGroup') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item
           v-if="aiAvailable"
           prepend-icon="mdi-robot-outline"
-          :title="t('subdivideGroupAi')"
-          :subtitle="t('subdivideGroupAiHint')"
           @click="onSubdivide(true)"
           data-testid="ctx-subdivide-ai"
-        ></v-list-item>
+        >
+          <v-list-item-title :title="t('subdivideGroupAiHint')">{{ t('subdivideGroupAi') }}</v-list-item-title>
+        </v-list-item>
         <v-divider></v-divider>
       </template>
 
@@ -364,4 +366,11 @@ watch(localShow, async (val) => {
 
 <style scoped>
 /* Specific tweak for submenu arrow if needed */
+
+/* 項目名を省略せず1行で表示する (日本語ラベルが途中で切れるのを防ぐ) */
+:deep(.v-list-item-title) {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
 </style>
