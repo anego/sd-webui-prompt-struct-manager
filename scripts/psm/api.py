@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Union, Optional
 import gradio as gr
-from scripts.psm import config, storage
+from scripts.psm import config, storage, translate as translate_mod
 
 def register_api(demo: gr.Blocks, app: FastAPI) -> None:
     print("\n[PSM] Registering API endpoints (Ver2 Bulletproof API)...")
@@ -143,16 +143,46 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
             positive_list = body.get("positive", [])
             negative_list = body.get("negative", [])
             profiles_list = body.get("profiles", [])
-            
+            model_mode = body.get("model_mode")
+
             result = storage.save_prompts_data(
                 decoded_file,
                 positive_list if isinstance(positive_list, list) else [],
                 negative_list if isinstance(negative_list, list) else [],
-                profiles_list if isinstance(profiles_list, list) else []
+                profiles_list if isinstance(profiles_list, list) else [],
+                model_mode if isinstance(model_mode, str) else None
             )
             return JSONResponse(content=result)
         except Exception as e:
             print(f"[PSM ERROR] save-prompts failed: {e}")
+            return JSONResponse(content={"status": "error", "message": str(e)})
+
+    @app.post("/psm/translate")
+    async def translate_prompt(request: Request) -> JSONResponse:
+        """
+        プロンプト原文を英語へ翻訳します (Phase 2.5)。
+        バックエンドはステートレスな中継であり、翻訳設定 (config) は
+        フロントエンド (localStorage) からリクエストごとに渡されます。
+        """
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse(content={"status": "error", "message": "Invalid JSON body"})
+
+            text = body.get("text")
+            cfg = body.get("config")
+
+            if not isinstance(text, str) or not text.strip():
+                return JSONResponse(content={"status": "error", "message": "翻訳する原文が空です。"})
+            if not isinstance(cfg, dict):
+                return JSONResponse(content={"status": "error", "message": "翻訳設定が不正です。"})
+
+            result = translate_mod.translate(text, cfg)
+            return JSONResponse(content={"status": "success", "text": result})
+        except translate_mod.TranslateError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)})
+        except Exception as e:
+            print(f"[PSM ERROR] translate failed: {e}")
             return JSONResponse(content={"status": "error", "message": str(e)})
 
     @app.post("/psm/duplicate-file")

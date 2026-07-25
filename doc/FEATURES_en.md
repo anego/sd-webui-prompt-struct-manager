@@ -13,7 +13,11 @@
 - **Enable/Disable:** Temporarily disable prompts via checkboxes without deleting them. Disabling a parent group excludes all child elements from output.
 - **Weighting:** Features a compact slider UI (`0.1` to `2.0`) next to each prompt chip for intuitive adjustments. Reset instantly to `1.0` with the "↺" button on the right edge of the slider.
 - **Toggle Slider Visibility:** You can turn the weight slider ON/OFF in settings (gear icon). The choice is remembered (LocalStorage) even after reloading the page.
-- **Underscore to Space Auto-Replacement:** If prompt content contains underscores (e.g., `sway_back`), they are automatically replaced with single spaces (e.g., `sway back`) when compiling and reflecting to the WebUI. However, Dynamic Prompts wildcards (e.g., `__character__`) are protected and their underscores are preserved.
+- **Underscore to Space Auto-Replacement:** If prompt content contains underscores (e.g., `sway_back`), they are automatically replaced with single spaces (e.g., `sway back`) when compiling and reflecting to the WebUI. The following tokens are protected and keep their underscores intact (checked per comma-separated token, so mixed multi-tag items are handled correctly):
+  - Dynamic Prompts wildcards (e.g., `__character__`)
+  - Score tags (`score_7`, `score_8_up`, etc. — used by Anima / Pony models)
+  - 3-character emoticon tags (`^_^`, `>_<`, `@_@`, `0_0`, etc.)
+  - Extra network syntax (`<lora:name_v2:0.8>`, `<hypernet:...>`, etc.)
 - **Tag Autocomplete Integration:** If `a1111-sd-webui-tagcomplete` is enabled, tag suggestions are available when typing prompts.
 - **Memo:** Attach memos to each prompt, viewable via tooltips.
 
@@ -92,8 +96,9 @@
 ### 3.3 Global Settings
 - **UI Scale:** 3-stage adjustment: Small / Medium / Large.
 - **Language:** Switch between Japanese / English.
-- **Save Location (Storage):** Change the YAML file save directory at the bottom of the sidebar.
+- **Save Location (Storage):** Change the YAML file save directory in the "Shortcut & Storage" group.
 - **File List Refresh:** Reload the file structure via the refresh button.
+- **Sidebar Grouping & Scroll:** Settings other than "File Operations" and "Model Mode" are organized into collapsible panels ("Display & Check", "Shortcut & Storage", "Translation Settings"). A vertical scrollbar appears automatically when the content exceeds the sidebar height.
 
 ### 3.4 Asynchronous Loading Indicator
 - **Loading Overlay:** Displays a full-screen, pointer-blocking loading overlay (`v-overlay`) during initial YAML loading, file list retrieval, and file operations (creating, duplicating, renaming, and deleting files).
@@ -101,6 +106,31 @@
 - **Operation Interlock:** Blocks all mouse and keyboard interactions during loading to prevent data corruption and race conditions caused by double clicks or concurrent updates.
 - **Reactive Progress Text:** Displays a central spinner (`v-progress-circular`) alongside localized messages such as "Loading..." or "Saving..." depending on the active operation.
 
-## 4. Developer Features (Dev Mode)
+## 4. Anima Model Support & Translation
+
+### 4.1 Model Mode
+- **Per-file switching:** Toggle between `SD` / `Anima` via the "Model Mode" control in the sidebar. The setting is stored at the YAML root (`model_mode`) independently per file.
+- **Backward compatible:** Existing YAML files without `model_mode` are treated as `SD`.
+
+### 4.2 Natural Language Items
+- **Purpose:** An item type for long-form prompts targeting natural-language-capable models such as Anima.
+- **Behavior:** Turning on the "Natural Language" switch in the edit modal skips underscore replacement, parenthesis escaping, and trailing-comma trimming, outputting the text as-is (weight `(text:w)` still applies).
+
+### 4.3 Prompt Translation (Japanese → English)
+- **Translate button:** When editing a natural-language item, a "Source Text" field and "Translate →" button appear. The source is translated to English via a local LLM or cloud API and written into the content field. The source is kept as `sourceText` and never included in output.
+- **Two profiles:** The "Translation Settings" panel keeps both `Local` and `Cloud` profiles at all times; switch with a toggle (no re-entry needed).
+- **Supported backends:** OpenAI-compatible APIs (Ollama / LM Studio / llama.cpp server / OpenAI / OpenRouter, etc.) and the DeepL API. Presets prefill endpoints.
+- **Where settings live:** Translation settings including API keys are stored only in browser `localStorage` (`psm_translate_settings`), never server-side. A notice is shown when a cloud profile is active.
+- **Connection test:** The "Test Connection" button runs a fixed short translation and shows the result or detailed error (including server messages such as model-not-found) inline.
+
+### 4.4 Category Ordering (Anima Recommended Tag Order)
+- **Category attribute:** Groups can be assigned a category — `Quality/Meta/Year/Safety`, `Subject`, `Character`, `Series`, `Artist`, `General` — in the group edit modal.
+- **Output-time ordering:** In Anima mode only, root-level nodes are stable-sorted by category priority when applying to the WebUI. Tree display and saved order are untouched, and relative order within the same category is preserved.
+- **Backward compatible:** Unset categories are treated as `General`, so existing YAML output order does not change. No sorting occurs in SD mode.
+
+### 4.5 Anima Template
+- **New-file option:** Turning on "Create with Anima template" in the new file dialog initializes the file with categorized group scaffolding (Quality / Year / Subject / Character / Series / Artist / General), Anima's officially recommended quality and negative tags, and Anima mode.
+
+## 5. Developer Features (Dev Mode)
 - **Debug Log:** Detailed debug info is output to the console only in Dev Mode via `src/log.ts`.
 - **Import:** An external import feature (experimental) is displayed in the UI only when in developer mode.

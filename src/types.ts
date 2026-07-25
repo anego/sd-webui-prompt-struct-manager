@@ -23,7 +23,63 @@ export interface PsmItem {
   children?: PsmItem[];
   isRandom?: boolean;
   isExclusive?: boolean;
+  /**
+   * 自然言語アイテムフラグ (Anima等の自然言語プロンプト用)
+   * trueの場合、コンパイル時にアンダースコア置換・括弧エスケープ・末尾カンマ除去をスキップし原文のまま出力する
+   */
+  isNatural?: boolean;
+  /**
+   * 翻訳前の原文 (自然言語アイテム用)
+   * コンパイル出力には一切含まれない。翻訳機能 (Phase 2.5) が参照する
+   */
+  sourceText?: string;
+  /**
+   * タグカテゴリ (グループ用・Phase 3)
+   * animaモード時、ルート直下をカテゴリ優先度で安定ソートして出力する。
+   * 未指定は "general" 扱い (既存YAMLの出力順は変わらない)
+   */
+  category?: PsmCategory;
 }
+
+/**
+ * タグカテゴリ (Anima推奨のタグ順序に対応)
+ * quality(品質/メタ/年代/安全) → subject(1girl等) → character → series → artist → general
+ */
+export type PsmCategory = "quality" | "subject" | "character" | "series" | "artist" | "general";
+
+/**
+ * 翻訳プロバイダの種別
+ * - "openai": OpenAI互換API (Ollama / LM Studio / llama.cpp / OpenAI / OpenRouter 等)
+ * - "deepl":  DeepL API
+ */
+export type TranslateProvider = "openai" | "deepl";
+
+/** 翻訳プロファイル (ローカル/クラウドそれぞれの設定一式) */
+export interface TranslateProfile {
+  provider: TranslateProvider;
+  endpoint: string;
+  model: string;
+  api_key: string;
+  timeout_sec: number;
+  system_prompt: string;
+}
+
+/**
+ * 翻訳設定 (localStorage "psm_translate_settings" に保存)
+ * ローカル/クラウドの2プロファイルを常時保持し、activeで切り替える
+ */
+export interface TranslateSettings {
+  active: "local" | "cloud";
+  local: TranslateProfile;
+  cloud: TranslateProfile;
+}
+
+/**
+ * 対象モデルのモード (YAMLファイル単位で保存)
+ * - "sd": SD系 (従来動作)
+ * - "anima": Anima (自然言語・スコアタグ等を考慮)
+ */
+export type ModelMode = "sd" | "anima";
 
 export interface PsmProfileState {
   id: number;

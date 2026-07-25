@@ -1,5 +1,5 @@
 import { reactive, watch } from "vue";
-import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory } from "./types";
 import { Logger, setDebugMode } from "./log";
 
 /**
@@ -79,6 +79,12 @@ export const state = reactive({
   loadingText: "",
   /** プロンプト大辞典が検出・マウントされているかどうかのフラグ */
   hasDictionary: false,
+  /** 対象モデルのモード (YAMLファイル単位で保存: "sd" | "anima") */
+  modelMode: "sd" as ModelMode,
+  /** 翻訳設定 (localStorage "psm_translate_settings" に保存) */
+  translateSettings: null as TranslateSettings | null,
+  /** 翻訳リクエスト実行中フラグ */
+  isTranslating: false,
   /** ローディング多重度カウンタ */
   loadingCount: 0,
 });
@@ -546,6 +552,7 @@ export const loadPrompts = async () => {
     state.positive = (data.positive || []).filter((i: PsmItem) => i != null);
     state.negative = (data.negative || []).filter((i: PsmItem) => i != null);
     state.profiles = data.profiles || [];
+    state.modelMode = data.model_mode === "anima" ? "anima" : "sd"; // 未定義は "sd" (後方互換)
     state.selectedProfileName = "";
     
     // 読み込まれたプロンプトデータの要約をテーブルとグループで可視化
@@ -586,6 +593,7 @@ export const savePrompts = async () => {
         positive: state.positive,
         negative: state.negative,
         profiles: state.profiles,
+        model_mode: state.modelMode,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -596,17 +604,62 @@ export const savePrompts = async () => {
 };
 
 /**
- * 新しい空のYAMLファイルを作成し、それを選択状態にする
- * @param name ファイル名 (拡張子なしでも可)
+ * Anima向けの初期テンプレートツリーを生成する (Phase 3)
+ * カテゴリ設定済みのグループ雛形と、Anima公式推奨の品質タグ/ネガティブを含む
  */
-export const createYamlFile = async (name: string) => {
+export const buildAnimaTemplate = (): { positive: PsmItem[]; negative: PsmItem[] } => {
+  let seq = 0;
+  const nextId = () => Date.now() * 1000 + (seq++); // 連番で同ミリ秒内の衝突を防止
+  const item = (content: string): PsmItem => ({
+    id: nextId(), name: "", content, enabled: true, weight: 1.0, memo: "", is_group: false,
+  });
+  const group = (name: string, category: PsmCategory, children: PsmItem[]): PsmItem => ({
+    id: nextId(), name, content: "", enabled: true, weight: 1.0, memo: "",
+    is_group: true, isOpen: true, category, children,
+  });
+
+  return {
+    positive: [
+      group("品質", "quality", [item("masterpiece"), item("best quality"), item("score_7"), item("safe")]),
+      group("年代", "quality", [item("newest")]),
+      group("主体", "subject", [item("1girl")]),
+      group("キャラクター", "character", []),
+      group("作品", "series", []),
+      group("絵師 (@付き)", "artist", []),
+      group("一般", "general", []),
+    ],
+    negative: [
+      group("品質 (Negative)", "quality", [
+        item("worst quality"), item("low quality"),
+        item("score_1"), item("score_2"), item("score_3"),
+        item("artist name"),
+      ]),
+    ],
+  };
+};
+
+/**
+ * 新しいYAMLファイルを作成し、それを選択状態にする
+ * @param name ファイル名 (拡張子なしでも可)
+ * @param withAnimaTemplate trueの場合、Animaテンプレート(model_mode: anima + 雛形ツリー)で初期化する
+ */
+export const createYamlFile = async (name: string, withAnimaTemplate = false) => {
   startLoading("saving");
   try {
     const filename = name.endsWith(".yaml") ? name : `${name}.yaml`;
+    const template = withAnimaTemplate ? buildAnimaTemplate() : { positive: [], negative: [] };
+    const payload: Record<string, unknown> = {
+      file: filename,
+      positive: template.positive,
+      negative: template.negative,
+    };
+    if (withAnimaTemplate) {
+      payload.model_mode = "anima";
+    }
     await fetch("/psm/save-prompts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file: filename, positive: [], negative: [] }),
+      body: JSON.stringify(payload),
     });
     await listFiles();
     state.selectedFile = filename;
@@ -717,6 +770,116 @@ export const saveSettingsLocal = () => {
   localStorage.setItem(LS_KEY, JSON.stringify(data));
 };
 
+// -------------------------------------------------------------------------
+// 翻訳設定 (Phase 2.5)
+// APIキーを含むため psm_settings とはキーを分離し、エクスポート系機能に巻き込まない
+// -------------------------------------------------------------------------
+
+const TRANSLATE_LS_KEY = "psm_translate_settings";
+
+/** 翻訳プロファイルの既定値を生成する */
+const defaultTranslateProfile = (kind: "local" | "cloud"): TranslateProfile => {
+  if (kind === "local") {
+    return {
+      provider: "openai",
+      endpoint: "http://localhost:11434/v1",
+      model: "qwen3:4b",
+      api_key: "",
+      timeout_sec: 30,
+      system_prompt: "",
+    };
+  }
+  return {
+    provider: "openai",
+    endpoint: "https://api.openai.com/v1",
+    model: "gpt-5-mini",
+    api_key: "",
+    timeout_sec: 30,
+    system_prompt: "",
+  };
+};
+
+/** 翻訳設定の既定値を生成する */
+export const defaultTranslateSettings = (): TranslateSettings => ({
+  active: "local",
+  local: defaultTranslateProfile("local"),
+  cloud: defaultTranslateProfile("cloud"),
+});
+
+/** UIプリセット定義 (選択中プロファイルへ反映する部分設定) */
+export const TRANSLATE_PRESETS: Record<string, Partial<TranslateProfile>> = {
+  ollama:     { provider: "openai", endpoint: "http://localhost:11434/v1", model: "qwen3:4b" },
+  // LM Studio はロード済みモデルの識別子が必須 (GET /v1/models の "id" を入力する)
+  lmstudio:   { provider: "openai", endpoint: "http://localhost:1234/v1", model: "" },
+  openai:     { provider: "openai", endpoint: "https://api.openai.com/v1", model: "gpt-5-mini" },
+  openrouter: { provider: "openai", endpoint: "https://openrouter.ai/api/v1", model: "" },
+  deepl:      { provider: "deepl", endpoint: "https://api-free.deepl.com/v2", model: "" },
+};
+
+/** 翻訳設定を localStorage から読み込む (欠損キーは既定値で補完) */
+export const loadTranslateSettings = () => {
+  const defaults = defaultTranslateSettings();
+  try {
+    const raw = localStorage.getItem(TRANSLATE_LS_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      state.translateSettings = {
+        active: data.active === "cloud" ? "cloud" : "local",
+        local: { ...defaults.local, ...(data.local || {}) },
+        cloud: { ...defaults.cloud, ...(data.cloud || {}) },
+      };
+      return;
+    }
+  } catch (e) {
+    Logger.error("[Store/Translate] 翻訳設定 (LocalStorage) の読み込みに失敗しました。既定値を使用します。", e);
+  }
+  state.translateSettings = defaults;
+};
+
+/** 翻訳設定を localStorage へ保存する */
+export const saveTranslateSettings = () => {
+  if (!state.translateSettings) return;
+  try {
+    localStorage.setItem(TRANSLATE_LS_KEY, JSON.stringify(state.translateSettings));
+  } catch (e) {
+    Logger.error("[Store/Translate] 翻訳設定 (LocalStorage) の保存に失敗しました。", e);
+  }
+};
+
+/** 現在アクティブな翻訳プロファイルを返す */
+export const getActiveTranslateProfile = (): TranslateProfile => {
+  if (!state.translateSettings) loadTranslateSettings();
+  const s = state.translateSettings!;
+  return s[s.active];
+};
+
+/**
+ * 原文を英語へ翻訳する (Phase 2.5)
+ * バックエンド /psm/translate へアクティブプロファイルの設定を同送する
+ * @returns 翻訳結果テキスト
+ * @throws Error 失敗時 (message はUI表示用)
+ */
+export const translateText = async (text: string): Promise<string> => {
+  const profile = getActiveTranslateProfile();
+  state.isTranslating = true;
+  try {
+    const res = await fetch("/psm/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, config: profile }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.status !== "success" || !data.text) {
+      throw new Error(data.message || "翻訳に失敗しました。");
+    }
+    Logger.debug("[Store/Translate] 翻訳が完了しました。", { in: text.length, out: data.text.length });
+    return data.text;
+  } finally {
+    state.isTranslating = false;
+  }
+};
+
 /**
  * グローバル設定をサーバから読み込む（初期化時）
  */
@@ -735,6 +898,7 @@ export const loadConfig = async () => {
     
     // LocalStorageからも読み込む
     loadSettingsLocal();
+    loadTranslateSettings();
     Logger.info(`[Store/Config] サーバーからグローバル設定を読み込みました。(セットアップ完了状況: ${state.isConfigured}, デバッグモード: ${state.isDevMode})`);
   } catch (e) {
     Logger.error("[Store/Config] サーバーからのグローバル設定読み込みに失敗しました。", e);
@@ -856,7 +1020,68 @@ export const createYamlWithData = async (n: string, pos: PsmItem[], neg: PsmItem
   await loadPrompts();
 };
 
-export const getCompiledPrompts = (nodes: PsmItem[], separator = ", "): string => {
+/**
+ * アンダースコアをスペースに置換してはいけないトークンのパターン集
+ * - ワイルドカード: Dynamic Prompts の __character__ 形式
+ * - スコアタグ: Anima の score_7 や Pony系の score_8_up 形式(アンダースコア必須)
+ * - 顔文字タグ: ^_^, >_<, @_@, 0_0 などの3文字タグ
+ */
+const PRESERVE_UNDERSCORE_PATTERNS: RegExp[] = [
+  /^__.+__$/,          // ワイルドカード (__character__)
+  /^score_\d(_up)?$/i, // スコアタグ (score_7, score_8_up)
+  /^._.$/,             // 3文字顔文字タグ (^_^, >_<, @_@, 0_0 など)
+  /^<.+>$/,            // 拡張ネットワーク構文 (<lora:name_v2:0.8>, <hypernet:...> など)
+];
+
+/**
+ * アンダースコア置換から保護すべきトークンかどうかを判定する
+ */
+const shouldPreserveUnderscore = (token: string): boolean =>
+  PRESERVE_UNDERSCORE_PATTERNS.some((re) => re.test(token.trim()));
+
+/**
+ * コンテンツ内のアンダースコアをスペースに置換する
+ * コンテンツがカンマ区切りで複数タグを含む場合はトークン単位で判定し、
+ * 保護対象トークン(score_7等)はそのまま維持する
+ */
+const replaceUnderscores = (content: string): string => {
+  if (shouldPreserveUnderscore(content)) return content;
+  return content
+    .split(",")
+    .map((part) => (shouldPreserveUnderscore(part) ? part : part.replace(/_/g, " ")))
+    .join(",");
+};
+
+/**
+ * カテゴリの出力優先度 (Anima推奨タグ順序・Phase 3)
+ * 未指定・不明なカテゴリは "general" と同順位
+ */
+export const CATEGORY_ORDER: PsmCategory[] = ["quality", "subject", "character", "series", "artist", "general"];
+
+const categoryPriority = (item: PsmItem): number => {
+  const idx = CATEGORY_ORDER.indexOf(item.category as PsmCategory);
+  return idx === -1 ? CATEGORY_ORDER.indexOf("general") : idx;
+};
+
+/**
+ * animaモード時にルート直下のノードをカテゴリ優先度で安定ソートする
+ * (同一カテゴリ内の相対順序は維持。ツリー表示は変更せず出力時のみ)
+ */
+const sortRootByCategory = (nodes: PsmItem[]): PsmItem[] => {
+  return nodes
+    .map((node, index) => ({ node, index }))
+    .sort((a, b) => {
+      const diff = categoryPriority(a.node) - categoryPriority(b.node);
+      return diff !== 0 ? diff : a.index - b.index; // 安定性の明示的保証
+    })
+    .map((e) => e.node);
+};
+
+export const getCompiledPrompts = (nodes: PsmItem[], separator = ", ", applyCategoryOrder = false): string => {
+  // animaモードかつルート呼び出しの場合のみカテゴリ整列 (再帰呼び出しには適用しない)
+  if (applyCategoryOrder && state.modelMode === "anima") {
+    nodes = sortRootByCategory(nodes);
+  }
   const raw = nodes
     .filter((n) => n.enabled)
     .map((n) => {
@@ -873,17 +1098,19 @@ export const getCompiledPrompts = (nodes: PsmItem[], separator = ", "): string =
         // アイテム
         let content = n.content;
 
-        // ワイルドカード（__wildcard__）はアンダーバーを置換しない
-        const isWildcard = /^__.+__$/.test(content.trim());
-        if (!isWildcard) {
-          content = content.replace(/_/g, " ");
-        }
+        if (n.isNatural) {
+          // 自然言語アイテム: 置換・エスケープを行わず原文のまま出力 (前後空白のみ除去)
+          content = content.trim();
+        } else {
+          // ワイルドカード・スコアタグ・顔文字タグを保護しつつアンダーバーをスペースに置換
+          content = replaceUnderscores(content);
 
-        // コンテンツ内の () をエスケープする
-        content = content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-        
-        // 末尾のカンマや空白を除去 (例: "foo, " -> "foo")
-        content = content.replace(/,\s*$/, "").trim();
+          // コンテンツ内の () をエスケープする
+          content = content.replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+
+          // 末尾のカンマや空白を除去 (例: "foo, " -> "foo")
+          content = content.replace(/,\s*$/, "").trim();
+        }
 
         return n.weight !== 1.0 ? `(${content}:${n.weight})` : content;
       }
@@ -937,6 +1164,15 @@ export const teleportItem = async (item: PsmItem, dest: PsmItem[], type: string)
 export const setLang = async (lang: "ja" | "en") => {
   state.lang = lang;
   saveSettingsLocal();
+};
+
+/**
+ * モデルモード ("sd" | "anima") を設定し、現在のYAMLファイルに即時保存する
+ * @param mode 設定するモード
+ */
+export const setModelMode = async (mode: ModelMode) => {
+  state.modelMode = mode;
+  await savePrompts();
 };
 
 /**

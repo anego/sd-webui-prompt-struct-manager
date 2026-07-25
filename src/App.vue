@@ -125,8 +125,9 @@ provide("psm-context-menu", openContextMenu);
  * 生成ボタンは押さない。
  */
 const handleApply = () => {
-  const posStr = getCompiledPrompts(state.positive);
-  const negStr = getCompiledPrompts(state.negative);
+  // 第3引数: animaモード時のみルート直下をカテゴリ優先度で整列して出力 (Phase 3)
+  const posStr = getCompiledPrompts(state.positive, ", ", true);
+  const negStr = getCompiledPrompts(state.negative, ", ", true);
   const root = getWebUiRoot();
   const img2imgGen = root.getElementById("img2img_generate");
   const prefix = img2imgGen && img2imgGen.offsetParent !== null ? "img2img" : "txt2img";

@@ -18,8 +18,36 @@ export interface PsmItem {
   isExclusive?: boolean;// カテゴリ内排他選択（択一モード）有効フラグ
   isOpen?: boolean;     // グループの場合の開閉状態 (UI用)
   children?: PsmItem[]; // 子アイテムの配列 (is_group: true の場合)
-  
+
+  isNatural?: boolean;  // 自然言語アイテム (置換・エスケープをスキップし原文出力)
+  sourceText?: string;  // 翻訳前の原文 (出力には含まれない)
+  category?: PsmCategory; // グループのタグカテゴリ (animaモード時の出力整列用)
+
   depth?: number;       // 表示用: 階層の深さ (計算プロパティまたは一時付与)
+}
+
+// タグカテゴリ (Anima推奨タグ順序: quality → subject → character → series → artist → general)
+export type PsmCategory = "quality" | "subject" | "character" | "series" | "artist" | "general";
+
+// モデルモード (YAMLファイル単位。未定義は "sd" 扱い)
+export type ModelMode = "sd" | "anima";
+
+// 翻訳プロバイダ / プロファイル / 設定 (Phase 2.5)
+export type TranslateProvider = "openai" | "deepl";
+
+export interface TranslateProfile {
+  provider: TranslateProvider;
+  endpoint: string;     // 例: http://localhost:11434/v1
+  model: string;        // OpenAI互換のみ使用 (DeepLでは無視)
+  api_key: string;
+  timeout_sec: number;
+  system_prompt: string; // 空なら内蔵デフォルト
+}
+
+export interface TranslateSettings {
+  active: "local" | "cloud"; // 使用中のプロファイル
+  local: TranslateProfile;
+  cloud: TranslateProfile;
 }
 
 export interface PsmProfileState {
@@ -38,6 +66,7 @@ export interface PsmProfile {
 保存されるYAMLファイルは、以下のルート構造を持つ。
 
 ```yaml
+model_mode: anima   # "sd" | "anima" (省略時は "sd"。Phase 2で追加)
 positive:
   - id: 1780190551195
     name: "キャラクター"
@@ -69,6 +98,8 @@ profiles:
 
 - **positive:** Positiveプロンプトツリーのルート配列。
 - **negative:** Negativeプロンプトツリーのルート配列。
+- **model_mode:** 対象モデルのモード。未定義・不正値は `sd` にフォールバック（後方互換）。
+- **未知キーの保持:** 保存時、既存ファイルにある未知のルートキーはそのまま引き継がれます（将来バージョンとの相互運用性のため）。
 
 ## 3. 設定データ (`localStorage` / `config.json`)
 
@@ -93,5 +124,30 @@ Pythonバックエンドが管理する設定ファイル。
   "toggle_shortcut": "Ctrl+Q",
   "duplicate_check_mode": "none",
   "show_weight_slider": true
+}
+```
+
+### `psm_translate_settings` (LocalStorage)
+翻訳設定 (Phase 2.5)。APIキーを含むため `psm_settings` とはキーを分離しています。
+サーバー側には保存されず、翻訳リクエストごとにアクティブプロファイルがバックエンドへ同送されます。
+```json
+{
+  "active": "local",
+  "local": {
+    "provider": "openai",
+    "endpoint": "http://localhost:11434/v1",
+    "model": "qwen3:4b",
+    "api_key": "",
+    "timeout_sec": 30,
+    "system_prompt": ""
+  },
+  "cloud": {
+    "provider": "openai",
+    "endpoint": "https://api.openai.com/v1",
+    "model": "gpt-5-mini",
+    "api_key": "sk-...",
+    "timeout_sec": 30,
+    "system_prompt": ""
+  }
 }
 ```

@@ -4,11 +4,34 @@
  * グループおよびプロンプトの新規作成・編集を行います。
  */
 import { computed, ref, watch, nextTick, onUnmounted } from "vue";
-import { state, finishEdit, cancelEdit, startDeleteConfirm } from "../store";
+import { state, finishEdit, cancelEdit, startDeleteConfirm, translateText } from "../store";
 import PsmModal from "./PsmModal.vue";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
+
+/** 翻訳エラーメッセージ (インライン表示用) */
+const translateError = ref("");
+
+/**
+ * 原文 (sourceText) を英訳し、結果を content へ反映する
+ * 既存の content がある場合は上書き確認を行う
+ */
+const onTranslate = async () => {
+  const item = state.editingItem;
+  if (!item || !item.sourceText?.trim() || state.isTranslating) return;
+
+  if (item.content?.trim()) {
+    if (!confirm(t("translateOverwriteConfirm"))) return;
+  }
+
+  translateError.value = "";
+  try {
+    item.content = await translateText(item.sourceText);
+  } catch (e) {
+    translateError.value = e instanceof Error ? e.message : String(e);
+  }
+};
 
 const nameInputRef = ref<{ focus: () => void } | null>(null);
 const contentInputRef = ref<{ focus: () => void; $el: HTMLElement } | null>(null);
@@ -338,6 +361,73 @@ const modalTitle = computed(() => {
               hide-details
               class="mb-1"
             ></v-switch>
+
+            <!-- Category Selector for Groups (Phase 3: animaモード時の出力整列に使用)
+                 zIndexはPsmModalの $z-index-modal (2000000000) より上にする必要がある -->
+            <v-select
+              v-if="state.editingItem.is_group"
+              :model-value="state.editingItem.category || 'general'"
+              :items="[
+                { title: t('catQuality'), value: 'quality' },
+                { title: t('catSubject'), value: 'subject' },
+                { title: t('catCharacter'), value: 'character' },
+                { title: t('catSeries'), value: 'series' },
+                { title: t('catArtist'), value: 'artist' },
+                { title: t('catGeneral'), value: 'general' },
+              ]"
+              :label="t('categoryLabel')"
+              :hint="t('categoryHint')"
+              persistent-hint
+              density="compact"
+              variant="outlined"
+              :menu-props="{ zIndex: 2000000010 }"
+              class="mb-1"
+              data-testid="edit-category-select"
+              @update:model-value="(v) => state.editingItem!.category = v"
+            ></v-select>
+
+            <!-- Natural Language Switch for Prompts -->
+            <v-switch
+              v-if="!state.editingItem.is_group"
+              v-model="state.editingItem.isNatural"
+              color="teal-accent-3"
+              :label="state.editingItem.isNatural ? t('naturalModeOn') : t('naturalModeOff')"
+              density="compact"
+              inset
+              hide-details
+              class="mb-1"
+              data-testid="natural-mode-switch"
+            ></v-switch>
+
+            <!-- Translation Source (Natural Language items only) -->
+            <template v-if="!state.editingItem.is_group && state.editingItem.isNatural">
+              <v-textarea
+                :label="t('translateSource')"
+                v-model="state.editingItem.sourceText"
+                variant="outlined"
+                auto-grow
+                rows="2"
+                max-rows="6"
+                hide-details
+                data-testid="edit-source-input"
+                class="mb-1"
+              ></v-textarea>
+              <div class="d-flex align-center mb-1">
+                <v-btn
+                  size="small"
+                  color="teal"
+                  variant="tonal"
+                  prepend-icon="mdi-translate"
+                  :loading="state.isTranslating"
+                  :disabled="!state.editingItem.sourceText?.trim()"
+                  @click="onTranslate"
+                  data-testid="translate-btn"
+                >
+                  {{ t('translateBtn') }}
+                </v-btn>
+                <span v-if="translateError" class="text-error text-caption ml-2">{{ translateError }}</span>
+              </div>
+            </template>
 
             <v-textarea
               v-if="!state.editingItem.is_group"

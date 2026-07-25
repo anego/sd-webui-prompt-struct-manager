@@ -22,6 +22,29 @@ This project has been tested with "Stable Diffusion WebUI reForge".
 *   **Smart Formatting**: Automatically consolidates consecutive commas for cleaner prompts.
 *   **File Management**: Save, load, duplicate, and rename prompt configurations as YAML files.
 *   **Keyboard Navigation**: Full keyboard support including arrow keys for navigation, F2 to edit, Delete to remove, etc.
+*   **Anima Model Support**: Per-file model mode switching (SD / Anima), category-based ordering following Anima's recommended tag order, and template creation (see "Anima Model Support" below).
+*   **Prompt Translation (JA → EN)**: Translate Japanese natural-language prompts to English using a local LLM (Ollama / LM Studio, etc.) or a cloud API (OpenAI-compatible / DeepL).
+
+## Anima Model Support
+
+Features for [Anima](https://huggingface.co/circlestone-labs/Anima) (the anime-focused model by CircleStone Labs × Comfy Org). Existing behavior for SD-family models is unaffected.
+
+*   **Model Mode (per file)**: Toggle between `SD` / `Anima` in the sidebar. Stored as `model_mode` in the YAML file; existing files without it are treated as SD.
+*   **Protected tokens**: Underscores in Anima score tags (`score_7`), Pony-style tags (`score_8_up`), emoticon tags (`^_^`, etc.), and extra network syntax (`<lora:name_v2:0.8>`) are protected from the underscore-to-space replacement (always on, mode-independent).
+*   **Natural Language Items**: Turning on "Natural Language" in the edit modal skips underscore replacement and parenthesis escaping, outputting long-form text as-is — ideal for Anima's natural-language prompting.
+*   **Category Ordering**: Assign groups a category (`Quality/Meta/Year/Safety`, `Subject`, `Character`, `Series`, `Artist`, `General`). In Anima mode only, root-level items are auto-ordered on apply following Anima's recommended order (quality → subject → character → series → artist → general). Tree display order is untouched.
+*   **Anima Template**: Enable "Create with Anima template" in the new file dialog to initialize with categorized group scaffolding and officially recommended quality/negative tags.
+
+## Prompt Translation
+
+Natural-language items gain a "Source Text" field and a "Translate →" button in the edit modal, converting Japanese text into an English prompt.
+
+*   **Two profiles (Local / Cloud)**: The "Translation Settings" panel keeps both a local-LLM profile and a cloud-API profile; switch with a single toggle.
+*   **Supported backends**: OpenAI-compatible APIs (Ollama / LM Studio / llama.cpp server / OpenAI / OpenRouter, etc.) and the DeepL API. Presets prefill endpoints.
+    *   For LM Studio, enter the model identifier (`id`) listed at `http://localhost:1234/v1/models`.
+*   **Where settings live**: Translation settings including API keys are stored only in browser localStorage — never server-side or in the repository. A notice is shown when a cloud profile is active, since prompts are sent to an external service.
+*   **Connection test**: Verify connectivity with a short test translation; detailed server error messages are shown inline.
+*   **Source preservation**: The original text is kept as the item's `sourceText` and never included in WebUI output.
 
 ## Installation
 

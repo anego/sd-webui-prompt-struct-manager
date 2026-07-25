@@ -18,10 +18,52 @@ import {
   clearDuplicateHighlight,
   setDuplicateCheckMode,
   saveSettingsLocal,
+  setModelMode,
+  loadTranslateSettings,
+  saveTranslateSettings,
+  translateText,
+  TRANSLATE_PRESETS,
 } from "../store";
 import { useI18n } from "../composables/useI18n";
+import { computed } from "vue";
 
 const { t } = useI18n();
+
+// ---- 翻訳設定 (Phase 2.5) ----
+
+if (!state.translateSettings) loadTranslateSettings();
+
+/** 選択中 (アクティブ) の翻訳プロファイル */
+const activeProfile = computed(() => {
+  const s = state.translateSettings!;
+  return s[s.active];
+});
+
+/** ローカル/クラウドの切替 */
+const setTranslateActive = (v: "local" | "cloud") => {
+  state.translateSettings!.active = v;
+  saveTranslateSettings();
+};
+
+/** プリセット適用 (選択中プロファイルの該当項目のみ上書き) */
+const selectedPreset = ref<string | null>(null);
+const applyPreset = (key: string | null) => {
+  if (!key || !(key in TRANSLATE_PRESETS)) return;
+  Object.assign(activeProfile.value, TRANSLATE_PRESETS[key]);
+  saveTranslateSettings();
+};
+
+/** 接続テスト */
+const testResult = ref<{ ok: boolean; text: string } | null>(null);
+const onTestTranslate = async () => {
+  testResult.value = null;
+  try {
+    const text = await translateText("こんにちは、世界");
+    testResult.value = { ok: true, text };
+  } catch (e) {
+    testResult.value = { ok: false, text: e instanceof Error ? e.message : String(e) };
+  }
+};
 
 const emit = defineEmits<{
   (e: "openDialog", name: "new" | "copy" | "rename"): void;
@@ -164,111 +206,227 @@ onUnmounted(() => {
 
         <v-divider class="mb-4"></v-divider>
 
-
-        
-
-
-        <div class="text-caption text-grey mb-1">{{ t('duplicateCheckMode') }}</div>
-        <v-radio-group
-          :model-value="state.duplicateCheckMode"
-          density="compact"
-          color="primary"
-          hide-details
-          class="mb-4"
-          @update:model-value="(val) => val && setDuplicateCheckMode(val as 'none' | 'warn' | 'error')"
-        >
-          <v-radio :label="t('checkNone')" value="none"></v-radio>
-          <v-radio :label="t('checkWarn')" value="warn"></v-radio>
-          <v-radio :label="t('checkError')" value="error"></v-radio>
-        </v-radio-group>
-
-        <v-switch
-          v-model="state.showWeightSlider"
-          color="primary"
-          density="compact"
-          hide-details
-          :label="t('showWeightSlider')"
-          @update:modelValue="saveSettingsLocal"
-          class="mb-4"
-        ></v-switch>
-
-        <div class="text-caption text-grey mb-1">{{ t('uiScale') }}</div>
+        <div class="text-caption text-grey mb-1">{{ t('modelMode') }}</div>
         <v-btn-toggle
-          v-model="state.uiScale"
+          :model-value="state.modelMode"
           mandatory
           divided
           density="compact"
-          color="primary"
+          color="teal"
           variant="outlined"
           class="w-100 mb-4"
-          @update:model-value="(v) => setUiScale(v)"
+          :disabled="!state.selectedFile"
+          @update:model-value="(v) => v && setModelMode(v as 'sd' | 'anima')"
         >
-          <v-btn value="small" size="small" class="flex-grow-1">{{ t('small') }}</v-btn>
-          <v-btn value="medium" size="small" class="flex-grow-1">{{ t('medium') }}</v-btn>
-          <v-btn value="large" size="small" class="flex-grow-1">{{ t('large') }}</v-btn>
+          <v-btn value="sd" size="small" class="flex-grow-1">{{ t('modelModeSd') }}</v-btn>
+          <v-btn value="anima" size="small" class="flex-grow-1">{{ t('modelModeAnima') }}</v-btn>
         </v-btn-toggle>
 
-        <div class="text-caption text-grey mb-1">{{ t('language') }}</div>
-        <v-btn-toggle
-          v-model="state.lang"
-          mandatory
-          divided
-          density="compact"
-          color="secondary"
-          variant="outlined"
-          class="w-100"
-          @update:model-value="(v) => setLang(v)"
-        >
-          <v-btn value="ja" size="small" class="flex-grow-1">JP</v-btn>
-          <v-btn value="en" size="small" class="flex-grow-1">EN</v-btn>
-        </v-btn-toggle>
+        <!-- Grouped settings (collapsible, keeps sidebar compact) -->
+        <v-expansion-panels variant="accordion" multiple class="mb-4">
 
-        <div class="text-caption text-grey mb-1">{{ t('toggleShortcut') }}</div>
-        <div class="d-flex align-center mb-4">
-          <v-text-field
-            :model-value="state.toggleShortcut || (isRecording ? '' : 'None')"
-            readonly
-            density="compact"
-            variant="outlined"
-            hide-details
-            :label="isRecording ? t('recording') : ''"
-            :placeholder="t('clickToRecord')"
-            :append-inner-icon="isRecording ? 'mdi-record-circle' : 'mdi-keyboard'"
-            class="flex-grow-1"
-            @click="startRecording"
-            :base-color="isRecording ? 'red' : ''"
-          ></v-text-field>
-          <v-btn
-             v-if="state.toggleShortcut && !isRecording"
-             icon="mdi-close"
-             size="x-small"
-             variant="text"
-             class="ml-1"
-             @click="clearShortcut"
-             :title="t('clear')"
-          ></v-btn>
-        </div>
-        
-        <div class="text-caption text-grey mb-1">Storage</div>
-        <div class="d-flex align-center mb-4">
-          <v-text-field
-            v-model="state.configDir"
-            density="compact"
-            variant="outlined"
-            hide-details
-            class="flex-grow-1"
-            :placeholder="t('configDir')"
-            @change="saveConfig(state.configDir)"
-          ></v-text-field>
-          <v-btn
-            icon="mdi-folder-open"
-            size="small"
-            variant="text"
-            class="ml-1"
-            @click="pickDirectory"
-            :title="t('selectDir')"
-          ></v-btn>
-        </div>
+          <!-- Group 1: Display / Check settings -->
+          <v-expansion-panel :title="t('displaySettings')">
+            <v-expansion-panel-text>
+              <div class="text-caption text-grey mb-1">{{ t('duplicateCheckMode') }}</div>
+              <v-radio-group
+                :model-value="state.duplicateCheckMode"
+                density="compact"
+                color="primary"
+                hide-details
+                class="mb-4"
+                @update:model-value="(val) => val && setDuplicateCheckMode(val as 'none' | 'warn' | 'error')"
+              >
+                <v-radio :label="t('checkNone')" value="none"></v-radio>
+                <v-radio :label="t('checkWarn')" value="warn"></v-radio>
+                <v-radio :label="t('checkError')" value="error"></v-radio>
+              </v-radio-group>
+
+              <v-switch
+                v-model="state.showWeightSlider"
+                color="primary"
+                density="compact"
+                hide-details
+                :label="t('showWeightSlider')"
+                @update:modelValue="saveSettingsLocal"
+                class="mb-4"
+              ></v-switch>
+
+              <div class="text-caption text-grey mb-1">{{ t('uiScale') }}</div>
+              <v-btn-toggle
+                v-model="state.uiScale"
+                mandatory
+                divided
+                density="compact"
+                color="primary"
+                variant="outlined"
+                class="w-100 mb-4"
+                @update:model-value="(v) => setUiScale(v)"
+              >
+                <v-btn value="small" size="small" class="flex-grow-1">{{ t('small') }}</v-btn>
+                <v-btn value="medium" size="small" class="flex-grow-1">{{ t('medium') }}</v-btn>
+                <v-btn value="large" size="small" class="flex-grow-1">{{ t('large') }}</v-btn>
+              </v-btn-toggle>
+
+              <div class="text-caption text-grey mb-1">{{ t('language') }}</div>
+              <v-btn-toggle
+                v-model="state.lang"
+                mandatory
+                divided
+                density="compact"
+                color="secondary"
+                variant="outlined"
+                class="w-100"
+                @update:model-value="(v) => setLang(v)"
+              >
+                <v-btn value="ja" size="small" class="flex-grow-1">JP</v-btn>
+                <v-btn value="en" size="small" class="flex-grow-1">EN</v-btn>
+              </v-btn-toggle>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+
+          <!-- Group 2: Shortcut / Storage -->
+          <v-expansion-panel :title="t('envSettings')">
+            <v-expansion-panel-text>
+              <div class="text-caption text-grey mb-1">{{ t('toggleShortcut') }}</div>
+              <div class="d-flex align-center mb-4">
+                <v-text-field
+                  :model-value="state.toggleShortcut || (isRecording ? '' : 'None')"
+                  readonly
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  :label="isRecording ? t('recording') : ''"
+                  :placeholder="t('clickToRecord')"
+                  :append-inner-icon="isRecording ? 'mdi-record-circle' : 'mdi-keyboard'"
+                  class="flex-grow-1"
+                  @click="startRecording"
+                  :base-color="isRecording ? 'red' : ''"
+                ></v-text-field>
+                <v-btn
+                   v-if="state.toggleShortcut && !isRecording"
+                   icon="mdi-close"
+                   size="x-small"
+                   variant="text"
+                   class="ml-1"
+                   @click="clearShortcut"
+                   :title="t('clear')"
+                ></v-btn>
+              </div>
+
+              <div class="text-caption text-grey mb-1">Storage</div>
+              <div class="d-flex align-center">
+                <v-text-field
+                  v-model="state.configDir"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  class="flex-grow-1"
+                  :placeholder="t('configDir')"
+                  @change="saveConfig(state.configDir)"
+                ></v-text-field>
+                <v-btn
+                  icon="mdi-folder-open"
+                  size="small"
+                  variant="text"
+                  class="ml-1"
+                  @click="pickDirectory"
+                  :title="t('selectDir')"
+                ></v-btn>
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+
+          <!-- Group 3: Translate Settings (Phase 2.5) -->
+          <v-expansion-panel v-if="state.translateSettings" :title="t('translateSettings')">
+            <v-expansion-panel-text>
+              <v-btn-toggle
+                :model-value="state.translateSettings.active"
+                mandatory
+                divided
+                density="compact"
+                color="teal"
+                variant="outlined"
+                class="w-100 mb-3"
+                @update:model-value="(v) => v && setTranslateActive(v as 'local' | 'cloud')"
+              >
+                <v-btn value="local" size="small" class="flex-grow-1">{{ t('translateLocal') }}</v-btn>
+                <v-btn value="cloud" size="small" class="flex-grow-1">{{ t('translateCloud') }}</v-btn>
+              </v-btn-toggle>
+
+              <div
+                v-if="state.translateSettings.active === 'cloud'"
+                class="text-caption text-orange mb-2"
+              >{{ t('translateCloudWarn') }}</div>
+
+              <v-select
+                v-model="selectedPreset"
+                :items="[
+                  { title: 'Ollama', value: 'ollama' },
+                  { title: 'LM Studio', value: 'lmstudio' },
+                  { title: 'OpenAI', value: 'openai' },
+                  { title: 'OpenRouter', value: 'openrouter' },
+                  { title: 'DeepL API Free', value: 'deepl' },
+                ]"
+                :label="t('translatePreset')"
+                density="compact"
+                variant="outlined"
+                hide-details
+                :menu-props="{ zIndex: 20000010 }"
+                class="mb-2"
+                @update:model-value="applyPreset"
+              ></v-select>
+
+              <v-text-field
+                v-model="activeProfile.endpoint"
+                :label="t('translateEndpoint')"
+                density="compact"
+                variant="outlined"
+                hide-details
+                class="mb-2"
+                @change="saveTranslateSettings"
+              ></v-text-field>
+
+              <v-text-field
+                v-if="activeProfile.provider !== 'deepl'"
+                v-model="activeProfile.model"
+                :label="t('translateModel')"
+                density="compact"
+                variant="outlined"
+                hide-details
+                class="mb-2"
+                @change="saveTranslateSettings"
+              ></v-text-field>
+
+              <v-text-field
+                v-model="activeProfile.api_key"
+                :label="t('translateApiKey')"
+                type="password"
+                autocomplete="off"
+                density="compact"
+                variant="outlined"
+                hide-details
+                class="mb-2"
+                @change="saveTranslateSettings"
+              ></v-text-field>
+
+              <v-btn
+                size="small"
+                variant="tonal"
+                color="teal"
+                block
+                :loading="state.isTranslating"
+                @click="onTestTranslate"
+              >{{ t('translateTest') }}</v-btn>
+
+              <div
+                v-if="testResult"
+                class="text-caption mt-2"
+                :class="testResult.ok ? 'text-success' : 'text-error'"
+              >{{ (testResult.ok ? t('translateTestOk') : t('translateTestFail')) + ': ' + testResult.text }}</div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
       </div>
       <v-spacer></v-spacer>
     </div>
@@ -283,6 +441,23 @@ onUnmounted(() => {
   &__content {
     transition: opacity 0.2s;
     opacity: 1;
+
+    /* 項目がサイドバーの高さを超えた場合は縦スクロール */
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    scrollbar-width: thin; /* Firefox */
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
 
     &--hidden {
       opacity: 0;
