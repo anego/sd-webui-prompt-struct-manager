@@ -236,6 +236,30 @@ const chipColor = computed(() => {
   return isDynamicPrompt.value ? 'cyan-accent-2' : 'primary';
 });
 
+/**
+ * カテゴリバッジの定義 (「一般」と未設定は表示しない)
+ */
+const CATEGORY_BADGE: Record<string, { key: string; color: string }> = {
+  quality: { key: "catShortQuality", color: "amber-darken-2" },
+  subject: { key: "catShortSubject", color: "cyan-darken-2" },
+  character: { key: "catShortCharacter", color: "pink-darken-2" },
+  series: { key: "catShortSeries", color: "indigo-darken-1" },
+  artist: { key: "catShortArtist", color: "purple-darken-2" },
+};
+
+const categoryBadge = computed(() => {
+  if (!props.item.is_group || !props.item.category || props.item.category === "general") {
+    return null;
+  }
+  return CATEGORY_BADGE[props.item.category] || null;
+});
+
+/** ヘッダ背景色 (headerColor設定時のみ適用) */
+const headerStyle = computed(() => {
+  if (!props.item.headerColor) return undefined;
+  return { backgroundColor: props.item.headerColor, borderRadius: "4px" };
+});
+
 const moveSelf = (dir: 'up' | 'down') => {
   const idx = props.parentChildren.findIndex(n => n.id === props.item.id);
   if (idx === -1) return;
@@ -295,6 +319,7 @@ const moveSelf = (dir: 'up' | 'down') => {
       <div
         class="psm-node__header d-flex align-center justify-start cursor-pointer py-1"
         :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
+        :style="headerStyle"
         @click.stop="handleClickHeader"
         @dblclick.stop="startEdit(item)"
         @contextmenu.prevent.stop="
@@ -350,6 +375,17 @@ const moveSelf = (dir: 'up' | 'down') => {
         >
           {{ item.name }}
         </span>
+
+        <!-- Category Badge (「一般」は非表示) -->
+        <v-chip
+          v-if="categoryBadge"
+          size="small"
+          :color="categoryBadge.color"
+          variant="flat"
+          label
+          class="ml-2 flex-shrink-0 psm-node__category-badge"
+          data-testid="group-category-badge"
+        >{{ t(categoryBadge.key) }}</v-chip>
 
         <!-- Inline Random Switch -->
         <v-switch
@@ -612,6 +648,13 @@ div.psm-node {
     overflow: hidden;
     opacity: 1;
     margin-bottom: $spacing-xs;
+  }
+
+  /* カテゴリバッジ: 濃色背景でも読めるよう白抜き+太字で強調 */
+  .psm-node__category-badge {
+    color: #fff !important;
+    font-weight: bold;
+    letter-spacing: 0.02em;
   }
 
   div.psm-node__group {

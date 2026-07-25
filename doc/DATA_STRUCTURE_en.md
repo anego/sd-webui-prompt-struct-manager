@@ -22,6 +22,7 @@ export interface PsmItem {
   isNatural?: boolean;  // Natural-language item (skips replacement/escaping, output as-is)
   sourceText?: string;  // Source text before translation (never included in output)
   category?: PsmCategory; // Group tag category (used for output ordering in anima mode)
+  headerColor?: string;   // Group header background color (CSS color string; default when omitted)
 
   depth?: number;       // For display: Hierarchy depth (Computed or temp attached)
 }

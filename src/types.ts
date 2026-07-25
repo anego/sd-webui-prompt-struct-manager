@@ -39,6 +39,11 @@ export interface PsmItem {
    * 未指定は "general" 扱い (既存YAMLの出力順は変わらない)
    */
   category?: PsmCategory;
+  /**
+   * グループヘッダの背景色 (グループ用・任意)
+   * CSSカラー文字列 (例: "#7f1d1d")。未指定はデフォルト背景
+   */
+  headerColor?: string;
 }
 
 /**

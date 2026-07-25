@@ -125,6 +125,8 @@
 
 ### 4.4 Category Ordering (Anima Recommended Tag Order)
 - **Category attribute:** Groups can be assigned a category — `Quality/Meta/Year/Safety`, `Subject`, `Character`, `Series`, `Artist`, `General` — in the group edit modal.
+- **Category badge:** The assigned category is shown as a color-coded badge next to the group name in the header (hidden for `General` and unset).
+- **Header background color:** Set a group header background color in the edit modal — 8 dark-theme-friendly presets, a custom color picker, and a "None" option to clear. Stored as `headerColor` in the YAML.
 - **Output-time ordering:** In Anima mode only, root-level nodes are stable-sorted by category priority when applying to the WebUI. Tree display and saved order are untouched, and relative order within the same category is preserved.
 - **Backward compatible:** Unset categories are treated as `General`, so existing YAML output order does not change. No sorting occurs in SD mode.
 

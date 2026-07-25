@@ -22,6 +22,7 @@ export interface PsmItem {
   isNatural?: boolean;  // 自然言語アイテム (置換・エスケープをスキップし原文出力)
   sourceText?: string;  // 翻訳前の原文 (出力には含まれない)
   category?: PsmCategory; // グループのタグカテゴリ (animaモード時の出力整列用)
+  headerColor?: string;   // グループヘッダの背景色 (CSSカラー文字列。未指定はデフォルト)
 
   depth?: number;       // 表示用: 階層の深さ (計算プロパティまたは一時付与)
 }

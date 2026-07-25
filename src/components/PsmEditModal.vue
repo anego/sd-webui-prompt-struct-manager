@@ -14,6 +14,26 @@ const { t } = useI18n();
 const translateError = ref("");
 
 /**
+ * グループヘッダ背景色のプリセット (ダークテーマに馴染む低明度8色)
+ */
+const HEADER_COLOR_PRESETS = [
+  "#7f1d1d", // 赤
+  "#78350f", // 琥珀
+  "#14532d", // 緑
+  "#134e4a", // ティール
+  "#1e3a8a", // 青
+  "#312e81", // 藍
+  "#581c87", // 紫
+  "#831843", // ピンク
+];
+
+/** カスタム色入力 (input type="color") のハンドラ */
+const onCustomColor = (e: Event) => {
+  const v = (e.target as HTMLInputElement).value;
+  if (state.editingItem) state.editingItem.headerColor = v;
+};
+
+/**
  * 原文 (sourceText) を英訳し、結果を content へ反映する
  * 既存の content がある場合は上書き確認を行う
  */
@@ -386,6 +406,38 @@ const modalTitle = computed(() => {
               @update:model-value="(v) => state.editingItem!.category = v"
             ></v-select>
 
+            <!-- Header Color Picker for Groups -->
+            <div v-if="state.editingItem.is_group" class="mb-2">
+              <div class="text-caption text-grey mb-1">{{ t('headerColorLabel') }}</div>
+              <div class="d-flex align-center ga-2 flex-wrap">
+                <button
+                  v-for="c in HEADER_COLOR_PRESETS"
+                  :key="c"
+                  type="button"
+                  class="psm-color-swatch"
+                  :class="{ 'psm-color-swatch--selected': state.editingItem.headerColor === c }"
+                  :style="{ backgroundColor: c }"
+                  :title="c"
+                  @click="state.editingItem!.headerColor = c"
+                ></button>
+                <label class="psm-color-swatch psm-color-swatch--custom" :title="t('headerColorCustom')">
+                  <v-icon size="14">mdi-palette</v-icon>
+                  <input
+                    type="color"
+                    :value="state.editingItem.headerColor || '#37474f'"
+                    @input="onCustomColor"
+                  />
+                </label>
+                <v-btn
+                  size="x-small"
+                  variant="text"
+                  prepend-icon="mdi-water-off"
+                  :disabled="!state.editingItem.headerColor"
+                  @click="state.editingItem!.headerColor = undefined"
+                >{{ t('headerColorClear') }}</v-btn>
+              </div>
+            </div>
+
             <!-- Natural Language Switch for Prompts -->
             <v-switch
               v-if="!state.editingItem.is_group"
@@ -563,6 +615,41 @@ const modalTitle = computed(() => {
   &__textarea--lifted {
     position: relative;
     z-index: $z-index-base;
+  }
+}
+
+/* グループヘッダ背景色のスウォッチ */
+.psm-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s, border-color 0.15s;
+
+  &:hover {
+    transform: scale(1.15);
+  }
+
+  &--selected {
+    border: 2px solid #fff;
+    transform: scale(1.1);
+  }
+
+  &--custom {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #e66465, #9198e5);
+    position: relative;
+
+    input[type="color"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
   }
 }
 
