@@ -34,12 +34,19 @@
 - **Enable All:** Click `[☑☑]` to enable all items within the group.
 - **Disable All:** Click `[☒]` to disable all items within the group.
 
-### 1.5 Duplicate Detection
+### 1.5 Apply Preview
+- **Preview button:** The "Preview" button next to "Apply & Close" in the toolbar lets you inspect the output before sending it to the WebUI.
+- **Full compiled output:** Shows the final output string for both Positive and Negative. In Anima mode, the actual category-ordered result is displayed.
+- **Tag-level diff:** Compares against the current WebUI textarea content, showing added tags in green, removed tags in red (struck through), and unchanged tags as outlined chips. Duplicate tags are compared by occurrence count.
+- **Statistics:** Displays tag count, character count, and added/removed counts (`+3 / -1`). Shows "No changes" when there is no difference.
+- **Apply from preview:** The "Apply Now" button runs the normal apply flow (including duplicate checking).
+
+### 1.6 Duplicate Detection
 - **Auto Detection:** Automatically detects and highlights duplicate prompts that have the exact same text within the tree.
 - **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
 - **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks.
 
-### 1.6 Prompt Dictionary Dual-way Integration
+### 1.7 Prompt Dictionary Dual-way Integration
 - **Portal Teleportation:** Upon opening the prompt editing modal, the DOM element of the "Prompt Dictionary on SDwebUI" extension is immediately detected and teleported (appendChild) into the modal's portal placeholder without any lag.
 - **Click Interception & Tag Insertion:** While editing, clicking the dictionary's "Insert" button will safely append the selected tags as comma-separated values into the PSM modal's text area instead of pasting them into the main WebUI prompt fields.
 - **Two-Column Layout with Independent Scroll:** When the dictionary integration is active, the modal width automatically expands to `1100px` (2 columns: PSM Edit form on the left, Dictionary search on the right). The dictionary area has independent vertical scrolling, preventing the modal action buttons (Save/Cancel/Delete) from being hidden at the bottom.
@@ -126,6 +133,11 @@
 ### 4.4 Category Ordering (Anima Recommended Tag Order)
 - **Category attribute:** Groups can be assigned a category — `Quality/Meta/Year/Safety`, `Subject`, `Character`, `Series`, `Artist`, `General` — in the group edit modal.
 - **Category badge:** The assigned category is shown as a color-coded badge next to the group name in the header (hidden for `General` and unset).
+- **Auto category detection:** Uses the tag database from `a1111-sd-webui-tagcomplete` (`tags/danbooru.csv`) to determine a group's category by majority vote across its tags.
+  - "Auto-detect Category" button in the group edit modal: applies the result to the category field and shows a breakdown (e.g. "of 12: Char8 / General3 / unknown1"). Nothing is saved until you press Done.
+  - "Auto-detect All" button in the sidebar (Anima mode only): applies detection to root groups with **no category set**; existing assignments are left untouched.
+  - Danbooru tag types (general / artist / copyright / character / meta) are mapped to PSM categories, and count/subject tags such as `1girl` and `solo` are assigned to `Subject`. Aliases (e.g. `longhair` → `long_hair`) also resolve.
+  - If tagcomplete is not installed, an explanatory message is shown (the feature is optional).
 - **Header background color:** Set a group header background color in the edit modal — 8 dark-theme-friendly presets, a custom color picker, and a "None" option to clear. Stored as `headerColor` in the YAML.
 - **Output-time ordering:** In Anima mode only, root-level nodes are stable-sorted by category priority when applying to the WebUI. Tree display and saved order are untouched, and relative order within the same category is preserved.
 - **Backward compatible:** Unset categories are treated as `General`, so existing YAML output order does not change. No sorting occurs in SD mode.

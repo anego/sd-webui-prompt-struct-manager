@@ -692,6 +692,213 @@ describe("状態スナップショット「プロファイル」機能", () => {
 });
 
 // -------------------------------------------------------------------------
+// 9. 反映前プレビューの差分計算 (Phase 5A) のテスト
+// -------------------------------------------------------------------------
+import { computePromptDiff, suggestCategoryForGroup, bulkAssignCategories } from "../src/store";
+
+describe("computePromptDiff - 反映前プレビューの差分計算 (Phase 5A)", () => {
+  it("9.1 追加・削除・共通トークンを正しく分類すること", () => {
+    // Arrange & Act
+    const d = computePromptDiff("1girl, solo, smile", "1girl, smile, long hair");
+
+    // Assert: 共通(1girl, smile) / 追加(long hair) / 削除(solo)
+    expect(d.common).toBe(2);
+    expect(d.added).toBe(1);
+    expect(d.removed).toBe(1);
+    expect(d.tokens.filter((t) => t.kind === "added").map((t) => t.text)).toEqual(["long hair"]);
+    expect(d.tokens.filter((t) => t.kind === "removed").map((t) => t.text)).toEqual(["solo"]);
+  });
+
+  it("9.2 トークンは新プロンプトの順で並び、削除トークンが末尾に付くこと", () => {
+    // Act
+    const d = computePromptDiff("old_tag, keep", "keep, new_tag");
+
+    // Assert
+    expect(d.tokens.map((t) => t.text)).toEqual(["keep", "new_tag", "old_tag"]);
+    expect(d.tokens.map((t) => t.kind)).toEqual(["common", "added", "removed"]);
+  });
+
+  it("9.3 変更がない場合は added/removed が 0 になること", () => {
+    const d = computePromptDiff("a, b, c", "a, b, c");
+    expect(d.added).toBe(0);
+    expect(d.removed).toBe(0);
+    expect(d.common).toBe(3);
+  });
+
+  it("9.4 重複タグを出現回数で比較すること", () => {
+    // Arrange: 旧2回 → 新3回なら 1つだけ「追加」
+    const d = computePromptDiff("dup, dup", "dup, dup, dup");
+    expect(d.common).toBe(2);
+    expect(d.added).toBe(1);
+    expect(d.removed).toBe(0);
+  });
+
+  it("9.5 空文字・余分な空白やカンマを安全に扱えること", () => {
+    // Arrange: 空の旧プロンプトから2タグ追加
+    const d1 = computePromptDiff("", " a ,, b , ");
+    expect(d1.added).toBe(2);
+    expect(d1.removed).toBe(0);
+    expect(d1.tokens.map((t) => t.text)).toEqual(["a", "b"]);
+
+    // 全削除のケース
+    const d2 = computePromptDiff("a, b", "");
+    expect(d2.removed).toBe(2);
+    expect(d2.added).toBe(0);
+  });
+
+  it("9.6 LoRA構文や自然言語文をカンマ単位のトークンとして扱うこと", () => {
+    // Arrange: LoRA構文は分割せず1トークン、自然言語文はカンマで分かれる
+    const d = computePromptDiff(
+      "<lora:old_style:0.8>",
+      "<lora:new_style:0.8>, A girl stands"
+    );
+    expect(d.tokens.filter((t) => t.kind === "added").map((t) => t.text))
+      .toEqual(["<lora:new_style:0.8>", "A girl stands"]);
+    expect(d.tokens.filter((t) => t.kind === "removed").map((t) => t.text))
+      .toEqual(["<lora:old_style:0.8>"]);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 10. カテゴリ自動判定 (Phase 5B) のテスト
+// -------------------------------------------------------------------------
+
+describe("カテゴリ自動判定 (Phase 5B)", () => {
+  const leaf = (content: string, extra: Partial<PsmItem> = {}): PsmItem => ({
+    id: Math.random() * 1e9 | 0, name: "", content, enabled: true, weight: 1.0, is_group: false, ...extra,
+  });
+  const group = (name: string, children: PsmItem[], extra: Partial<PsmItem> = {}): PsmItem => ({
+    id: Math.random() * 1e9 | 0, name, content: "", enabled: true, weight: 1.0,
+    is_group: true, children, ...extra,
+  });
+
+  it("10.1 suggestCategoryForGroup: 多数決でカテゴリを提案し、内訳を返すこと", async () => {
+    // Arrange: characterが多数
+    const g = group("キャラ", [
+      leaf("oomuro sakurako"), leaf("toshinou kyouko"), leaf("smile"),
+    ]);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: "success",
+        categories: {
+          "oomuro sakurako": "character",
+          "toshinou kyouko": "character",
+          "smile": "general",
+        },
+      }),
+    } as Response);
+
+    // Act
+    const s = await suggestCategoryForGroup(g);
+
+    // Assert
+    expect(s.suggested).toBe("character");
+    expect(s.counts).toEqual({ character: 2, general: 1 });
+    expect(s.total).toBe(3);
+    expect(s.unknown).toBe(0);
+  });
+
+  it("10.2 suggestCategoryForGroup: 自然言語・ワイルドカード・LoRA・制御トークンを照会対象から除外すること", async () => {
+    // Arrange
+    const g = group("混在", [
+      leaf("1girl"),
+      leaf("A girl is standing.", { isNatural: true }),
+      leaf("__wildcard__"),
+      leaf("<lora:foo:0.8>"),
+      leaf("BREAK"),
+    ]);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "success", categories: { "1girl": "subject" } }),
+    } as Response);
+
+    // Act
+    const s = await suggestCategoryForGroup(g);
+
+    // Assert: 照会されたのは 1girl のみ
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.tags).toEqual(["1girl"]);
+    expect(s.total).toBe(1);
+    expect(s.suggested).toBe("subject");
+  });
+
+  it("10.3 suggestCategoryForGroup: ネストしたグループ内のタグも収集すること", async () => {
+    // Arrange
+    const g = group("親", [
+      leaf("masterpiece"),
+      group("子", [leaf("best quality")]),
+    ]);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "success", categories: {} }),
+    } as Response);
+
+    // Act
+    await suggestCategoryForGroup(g);
+
+    // Assert
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.tags).toEqual(["masterpiece", "best quality"]);
+  });
+
+  it("10.4 suggestCategoryForGroup: タグDB未検出時はエラーメッセージ付きで例外を投げること", async () => {
+    // Arrange
+    const g = group("g", [leaf("1girl")]);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "error", message: "タグDBが見つかりません。" }),
+    } as Response);
+
+    // Act & Assert
+    await expect(suggestCategoryForGroup(g)).rejects.toThrow("タグDBが見つかりません。");
+  });
+
+  it("10.5 suggestCategoryForGroup: 対象タグが無い場合はAPIを呼ばず null を返すこと", async () => {
+    // Arrange: 自然言語のみ
+    const g = group("NLのみ", [leaf("A cat sits.", { isNatural: true })]);
+
+    // Act
+    const s = await suggestCategoryForGroup(g);
+
+    // Assert
+    expect(s.suggested).toBeNull();
+    expect(s.total).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("10.6 bulkAssignCategories: 未設定グループのみに適用し、設定済みはスキップすること", async () => {
+    // Arrange
+    state.selectedFile = "bulk.yaml";
+    state.positive = [
+      group("未設定", [leaf("oomuro sakurako")]),
+      group("設定済み", [leaf("smile")], { category: "quality" }), // 変更されないこと
+    ];
+    state.negative = [];
+
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({ status: "success", categories: { "oomuro sakurako": "character" } }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    const r = await bulkAssignCategories();
+
+    // Assert
+    expect(state.positive[0].category).toBe("character");
+    expect(state.positive[1].category).toBe("quality"); // 設定済みは保持
+    expect(r.applied).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+});
+
+// -------------------------------------------------------------------------
 // 8. カテゴリ整列とAnimaテンプレート (Phase 3) のテスト
 // -------------------------------------------------------------------------
 import { buildAnimaTemplate, createYamlFile } from "../src/store";

@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Union, Optional
 import gradio as gr
-from scripts.psm import config, storage, translate as translate_mod
+from scripts.psm import config, storage, translate as translate_mod, tagdb
 
 def register_api(demo: gr.Blocks, app: FastAPI) -> None:
     print("\n[PSM] Registering API endpoints (Ver2 Bulletproof API)...")
@@ -183,6 +183,43 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
             return JSONResponse(content={"status": "error", "message": str(e)})
         except Exception as e:
             print(f"[PSM ERROR] translate failed: {e}")
+            return JSONResponse(content={"status": "error", "message": str(e)})
+
+    @app.get("/psm/tagdb-status")
+    async def tagdb_status(request: Request) -> JSONResponse:
+        """
+        タグDB (tagcomplete CSV) の利用可否を返します (Phase 5B)。
+        初回呼び出しでロードがトリガーされます。
+        """
+        try:
+            return JSONResponse(content=tagdb.get_status())
+        except Exception as e:
+            print(f"[PSM ERROR] tagdb-status failed: {e}")
+            return JSONResponse(content={"available": False, "source": None, "entries": 0})
+
+    @app.post("/psm/tag-categories")
+    async def tag_categories(request: Request) -> JSONResponse:
+        """
+        タグのリストに対しPSMカテゴリを返します (Phase 5B)。
+        """
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse(content={"status": "error", "message": "Invalid JSON body"})
+            tags = body.get("tags")
+            if not isinstance(tags, list) or not tags:
+                return JSONResponse(content={"status": "error", "message": "tags が空です。"})
+
+            categories = tagdb.lookup(tags)
+            return JSONResponse(content={
+                "status": "success",
+                "categories": categories,
+                "source": tagdb._source,
+            })
+        except RuntimeError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)})
+        except Exception as e:
+            print(f"[PSM ERROR] tag-categories failed: {e}")
             return JSONResponse(content={"status": "error", "message": str(e)})
 
     @app.post("/psm/duplicate-file")

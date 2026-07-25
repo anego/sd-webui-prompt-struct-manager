@@ -23,6 +23,7 @@ import {
   saveTranslateSettings,
   translateText,
   TRANSLATE_PRESETS,
+  bulkAssignCategories,
 } from "../store";
 import { useI18n } from "../composables/useI18n";
 import { computed } from "vue";
@@ -62,6 +63,28 @@ const onTestTranslate = async () => {
     testResult.value = { ok: true, text };
   } catch (e) {
     testResult.value = { ok: false, text: e instanceof Error ? e.message : String(e) };
+  }
+};
+
+// ---- カテゴリ一括判定 (Phase 5B) ----
+
+const isBulkCat = ref(false);
+const bulkCatResult = ref("");
+
+/** カテゴリ未設定のルートグループのみを自動判定して適用する */
+const onBulkAssignCategories = async () => {
+  if (isBulkCat.value) return;
+  isBulkCat.value = true;
+  bulkCatResult.value = "";
+  try {
+    const r = await bulkAssignCategories();
+    bulkCatResult.value = r.applied
+      ? t("bulkCatResult", { applied: String(r.applied), skipped: String(r.skipped) })
+      : t("bulkCatNone");
+  } catch (e) {
+    bulkCatResult.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    isBulkCat.value = false;
   }
 };
 
@@ -221,6 +244,24 @@ onUnmounted(() => {
           <v-btn value="sd" size="small" class="flex-grow-1">{{ t('modelModeSd') }}</v-btn>
           <v-btn value="anima" size="small" class="flex-grow-1">{{ t('modelModeAnima') }}</v-btn>
         </v-btn-toggle>
+
+        <!-- Bulk Category Detection (Anima mode only / Phase 5B) -->
+        <template v-if="state.modelMode === 'anima'">
+          <v-btn
+            size="small"
+            variant="tonal"
+            color="teal"
+            block
+            prepend-icon="mdi-auto-fix"
+            class="mb-2"
+            :loading="isBulkCat"
+            :disabled="!state.selectedFile"
+            @click="onBulkAssignCategories"
+            data-testid="bulk-category-btn"
+          >{{ t('bulkCatBtn') }}</v-btn>
+          <div v-if="bulkCatResult" class="text-caption text-grey mb-4">{{ bulkCatResult }}</div>
+          <div v-else class="mb-2"></div>
+        </template>
 
         <!-- Grouped settings (collapsible, keeps sidebar compact) -->
         <v-expansion-panels variant="accordion" multiple class="mb-4">

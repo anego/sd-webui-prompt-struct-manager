@@ -775,6 +775,19 @@ export const saveSettingsLocal = () => {
 // APIキーを含むため psm_settings とはキーを分離し、エクスポート系機能に巻き込まない
 // -------------------------------------------------------------------------
 
+/**
+ * PSM APIのHTTPエラーを分かりやすいメッセージに変換する
+ * 404は「バックエンド未登録 = WebUI再起動が必要」を意味することが多いため明示する
+ */
+const apiHttpError = (status: number, endpoint: string): Error => {
+  if (status === 404) {
+    return new Error(
+      `APIが見つかりません (404: ${endpoint})。Python側の更新を反映するにはWebUIの再起動が必要です。`
+    );
+  }
+  return new Error(`HTTP ${status} (${endpoint})`);
+};
+
 const TRANSLATE_LS_KEY = "psm_translate_settings";
 
 /** 翻訳プロファイルの既定値を生成する */
@@ -868,7 +881,7 @@ export const translateText = async (text: string): Promise<string> => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, config: profile }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw apiHttpError(res.status, "/psm/translate");
     const data = await res.json();
     if (data.status !== "success" || !data.text) {
       throw new Error(data.message || "翻訳に失敗しました。");
@@ -1124,6 +1137,194 @@ export const getCompiledPrompts = (nodes: PsmItem[], separator = ", ", applyCate
       return raw.replace(/,\s*,/g, ", ");
   }
   return raw;
+};
+
+// -------------------------------------------------------------------------
+// 反映前プレビュー (Phase 5A)
+// -------------------------------------------------------------------------
+
+export interface PromptDiffToken {
+  text: string;
+  kind: "added" | "removed" | "common";
+}
+
+export interface PromptDiffResult {
+  tokens: PromptDiffToken[];
+  added: number;
+  removed: number;
+  common: number;
+}
+
+/**
+ * 2つのプロンプト文字列をカンマ区切りトークン単位で比較する (純関数)
+ * 重複タグは出現回数で比較。共通/追加トークンは新文字列の順で並び、削除トークンは末尾に付く
+ */
+export const computePromptDiff = (oldStr: string, newStr: string): PromptDiffResult => {
+  const tokenize = (s: string) => (s || "").split(",").map((t) => t.trim()).filter((t) => t);
+  const oldTokens = tokenize(oldStr);
+  const newTokens = tokenize(newStr);
+
+  const remaining = new Map<string, number>();
+  oldTokens.forEach((t) => remaining.set(t, (remaining.get(t) || 0) + 1));
+
+  const tokens: PromptDiffToken[] = [];
+  let added = 0;
+  let common = 0;
+
+  for (const t of newTokens) {
+    const c = remaining.get(t) || 0;
+    if (c > 0) {
+      remaining.set(t, c - 1);
+      tokens.push({ text: t, kind: "common" });
+      common++;
+    } else {
+      tokens.push({ text: t, kind: "added" });
+      added++;
+    }
+  }
+
+  let removed = 0;
+  for (const t of oldTokens) {
+    const c = remaining.get(t) || 0;
+    if (c > 0) {
+      remaining.set(t, c - 1);
+      tokens.push({ text: t, kind: "removed" });
+      removed++;
+    }
+  }
+
+  return { tokens, added, removed, common };
+};
+
+/**
+ * WebUIのプロンプトテキストエリアの現在値を加工せずに取得する (プレビューの比較元)
+ */
+export const getWebUIRawPrompts = (): { positive: string; negative: string } => {
+  const prefix =
+    document.getElementById("img2img_generate")?.offsetParent !== null
+      ? "img2img"
+      : "txt2img";
+  const getVal = (id: string) =>
+    (
+      document
+        .querySelector(`#${prefix}_${id}`)
+        ?.querySelector("textarea") as HTMLTextAreaElement
+    )?.value || "";
+  return { positive: getVal("prompt"), negative: getVal("neg_prompt") };
+};
+
+// -------------------------------------------------------------------------
+// カテゴリ自動判定 (Phase 5B / tagcomplete のタグDBを利用)
+// -------------------------------------------------------------------------
+
+export interface CategorySuggestion {
+  /** 多数決で選ばれたカテゴリ (判定不能ならnull) */
+  suggested: PsmCategory | null;
+  /** カテゴリ別の判定数 */
+  counts: Record<string, number>;
+  /** 照会したタグ総数 */
+  total: number;
+  /** タグDBに存在しなかったタグ数 */
+  unknown: number;
+}
+
+/**
+ * グループ配下から判定対象のタグを収集する
+ * (自然言語アイテム・ワイルドカード・LoRA構文・制御トークンは除外)
+ */
+const collectGroupTags = (group: PsmItem): string[] => {
+  const tags: string[] = [];
+  const walk = (nodes: PsmItem[]) => {
+    for (const n of nodes) {
+      if (!n) continue;
+      if (n.is_group && n.children) {
+        walk(n.children);
+      } else if (!n.is_group && !n.isNatural) {
+        for (const tok of (n.content || "").split(",")) {
+          const t = tok.trim();
+          if (!t) continue;
+          if (/^__.+__$/.test(t) || /^<.+>$/.test(t) || /^(BREAK|AND)$/i.test(t)) continue;
+          tags.push(t);
+        }
+      }
+    }
+  };
+  walk(group.children || []);
+  return tags;
+};
+
+/**
+ * グループのカテゴリをタグDBの多数決で提案する
+ * @throws Error タグDB未検出・通信失敗時 (messageはUI表示用)
+ */
+export const suggestCategoryForGroup = async (group: PsmItem): Promise<CategorySuggestion> => {
+  const tags = collectGroupTags(group);
+  if (!tags.length) {
+    return { suggested: null, counts: {}, total: 0, unknown: 0 };
+  }
+
+  const res = await fetch("/psm/tag-categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  });
+  if (!res.ok) throw apiHttpError(res.status, "/psm/tag-categories");
+  const data = await res.json();
+  if (data.status !== "success") {
+    throw new Error(data.message || "Tag DB unavailable");
+  }
+
+  const counts: Record<string, number> = {};
+  let unknown = 0;
+  for (const t of tags) {
+    const c = data.categories?.[t] || "unknown";
+    if (c === "unknown") {
+      unknown++;
+    } else {
+      counts[c] = (counts[c] || 0) + 1;
+    }
+  }
+
+  let suggested: PsmCategory | null = null;
+  let best = 0;
+  for (const [c, n] of Object.entries(counts)) {
+    if (n > best) {
+      best = n;
+      suggested = c as PsmCategory;
+    }
+  }
+  return { suggested, counts, total: tags.length, unknown };
+};
+
+/**
+ * ルート直下のカテゴリ未設定グループへ自動判定結果を一括適用する
+ * (設定済みグループは変更しない)
+ */
+export const bulkAssignCategories = async (): Promise<{ applied: number; skipped: number; counts: Record<string, number> }> => {
+  let applied = 0;
+  let skipped = 0;
+  const counts: Record<string, number> = {};
+
+  const roots = [...state.positive, ...state.negative].filter((n) => n && n.is_group);
+  for (const g of roots) {
+    if (g.category) {
+      skipped++;
+      continue;
+    }
+    const s = await suggestCategoryForGroup(g);
+    if (s.suggested) {
+      g.category = s.suggested;
+      counts[s.suggested] = (counts[s.suggested] || 0) + 1;
+      applied++;
+    } else {
+      skipped++;
+    }
+  }
+
+  if (applied > 0) {
+    await savePrompts();
+  }
+  return { applied, skipped, counts };
 };
 
 export const setAllGroupsOpen = (open: boolean) => {

@@ -121,7 +121,20 @@ negative:
 | 3 | **実装済 (2026-07-25)** | カテゴリ整列、Animaテンプレート | `types.ts`, `store.ts`, `App.vue`, `PsmEditModal.vue`, `PsmFileDialogs.vue`, `i18n/*`, `tests/*` |
 | 4 | **実装済 (2026-07-25)** | ドキュメント更新(DATA_STRUCTURE / FEATURES 和英) | `doc/DATA_STRUCTURE(_en).md`, `doc/FEATURES(_en).md` |
 
+| 5A | **実装済 (2026-07-25)** | 反映前プレビュー(コンパイル結果+タグ単位差分)。詳細は§6.1 | `store.ts`, `App.vue`, `PsmPreviewModal.vue`(新設), `i18n/*`, `tests/*` |
+| 5B | **実装済 (2026-07-25)** | カテゴリ自動判定(tagcomplete タグDB)。詳細は§6.2 | `tagdb.py`(新設), `api.py`, `store.ts`, `PsmEditModal.vue`, `PsmSideBar.vue`, `i18n/*`, `tests/*` |
+
 ※ Phase 4 補足: 更新対象は日本語版とペアで保守されている `*_en.md`。`doc/en/` フォルダは旧世代のコピーと思われるため未更新(不要なら削除を検討)。
+
+### Phase 5 実装メモ (2026-07-25)
+
+- **5A**: `computePromptDiff(oldStr, newStr)` を純関数として `store.ts` に実装(カンマ区切りトークン比較・重複は出現回数で判定)。ツールバーの「プレビュー」ボタン → `PsmPreviewModal.vue`。animaモードではカテゴリ整列適用後の実出力を表示
+- **5B**: データソースは**tagcomplete の `tags/danbooru.csv` を採用**(設計時に検討した大辞典データは未使用)。`tagdb.py` が `extensions/*/tags/danbooru*.csv` を自動探索し、遅延ロード+プロセス内キャッシュ
+  - 実測: 170,752エントリ(エイリアス含む)を **0.14秒**でロード
+  - Danbooruカテゴリ `0/1/3/4/5` → `general/artist/series/character/quality`、`1girl`・`solo` 等は `SUBJECT_TAGS` により `subject` へ振替
+  - UIは**提案ベース**: 編集モーダルの「カテゴリ自動判定」(多数決+内訳表示)、サイドバーの「カテゴリ一括判定」(**未設定グループのみ**適用、animaモード時のみ表示)
+- 副次修正: 未定義だったi18nキー5件(`open` / `refresh` / `configDir` / `selectDir` / `clickToOpen`)を和英に追加(ツールチップにキー名が生表示されていた既存バグ)
+- 検証: tagdb を実CSVで直接テスト(カテゴリマッピング・エイリアス解決・正規化・キャッシュ)、`computePromptDiff` をミラー実行(10項目)し全パス。pytest 約17件・vitest 12件を追加
 
 ### Phase 3 実装メモ (2026-07-25)
 
@@ -323,7 +336,65 @@ translation. No explanations, no quotes. Keep proper nouns as-is.
 - localStorageはブラウザ・PCごとに独立 → 別ブラウザで開くと翻訳設定の再入力が必要(仕様として許容)
 - 将来拡張: タグアイテムの日本語→Danbooruタグ変換は精度課題があるため本Phaseのスコープ外
 
-## 6. 互換性・注意事項
+## 6. Phase 5: カテゴリ自動判定・反映前プレビュー 設計書
+
+作成日: 2026-07-25
+
+### 6.1 Phase 5A: 反映前プレビュー (フロントエンドのみ)
+
+「反映」前にコンパイル結果と現在のWebUIテキストエリアとの差分を確認するモーダル。
+
+**UI**: ツールバーの「反映」ボタン群の隣に「プレビュー」ボタンを追加 → `PsmPreviewModal.vue`(新設)を表示。
+
+- Positive / Negative それぞれについて表示:
+  - コンパイル結果全文(animaモードならカテゴリ整列適用後 = `getCompiledPrompts(nodes, ", ", true)`)
+  - **タグ単位の差分**: 現在のWebUIテキストエリアの内容とカンマ区切りトークンで比較し、追加タグを緑・削除タグを赤・共通タグをグレーでチップ表示
+  - 統計: タグ数 / 文字数
+- モーダル内「このまま反映」ボタンで `handleApply` を実行して閉じる
+- 差分ロジックは純関数 `computePromptDiff(oldStr, newStr)` として `store.ts`(または `utils`)に実装しユニットテスト可能にする
+  - トークン化: カンマ分割 + trim。`<lora:...>` や自然言語文もトークンとして扱う(分割はカンマのみ)
+  - 判定: 追加 = newにあってoldにない / 削除 = oldにあってnewにない(重複タグは出現回数で比較)
+
+**影響ファイル**: `App.vue`(ボタン)、`PsmPreviewModal.vue`(新設)、`store.ts`(computePromptDiff)、`i18n/*`、`tests/store_prompt.spec.ts`
+
+### 6.2 Phase 5B: カテゴリ自動判定
+
+タグデータベースを参照して、グループのカテゴリを自動判定・提案する。
+
+**データソース(自動探索・優先順)**:
+
+| 優先 | ソース | 形式 | 備考 |
+|---|---|---|---|
+| 1 | a1111-sd-webui-tagcomplete | `extensions/*/tags/danbooru*.csv`(`tag,category,count,aliases`) | 軽量・高速。本環境には未導入だが公開リポジトリとして対応 |
+| 2 | プロンプト大辞典 | `extensions/sd-webui-prompt-dictionary/data/runtime_js/00_prompt_dictionary_data.js` | **本環境で利用可能**。14万語、`category` + `ja`(日本語訳)を含む。`window.PROMPT_DICTIONARY_DATA = [...]` 形式のため接頭辞を除去してJSONパース |
+
+**バックエンド** (`scripts/psm/tagdb.py` 新設):
+
+- 遅延ロード+プロセス内キャッシュ。パース後は `{正規化タグ: {"category": str, "ja": str}}` の最小辞書のみ保持(61MBのJSONは読み捨て)
+- 正規化: 小文字化・スペース→アンダースコア(PSM内はスペース表記、DB側はアンダースコア表記のため)
+- エイリアスも辞書に展開
+- Danbooruカテゴリ → PSMカテゴリのマッピング:
+  - `0`(general) → `general`(ただし主体タグリストに一致すれば `subject`)
+  - `1`(artist) → `artist` / `3`(copyright) → `series` / `4`(character) → `character` / `5`(meta) → `quality`
+  - 主体タグリスト(ハードコード): `1girl, 1boy, 2girls, 2boys, 3girls, multiple girls, multiple boys, solo, 1other, no humans` 等
+- API:
+  - `POST /psm/tag-categories` `{tags: [...]}` → `{status, categories: {tag: PSMカテゴリ|"unknown"}, source: "..."}`
+  - `GET /psm/tagdb-status` → `{available: bool, source, entries}`(初回ロードのトリガー兼用)
+
+**フロントエンドUX**(v1は提案ベース、自動書き換えはしない):
+
+1. **グループ編集モーダル「自動判定」ボタン**: グループ直下のアイテム(タグアイテムのみ、`<lora:...>`・ワイルドカード・自然言語は除外)を照会し、**多数決**でカテゴリを提案 → カテゴリ選択欄に反映(ユーザーが完了を押すまで保存されない)。判定内訳(「12件中: キャラ8, 一般3, 不明1」)をヒント表示
+2. **一括判定**: サイドバー(Animaモード時のみ表示)の「カテゴリ一括判定」ボタン → カテゴリ**未設定**のルート直下グループのみを判定して適用し、結果サマリを表示。設定済みグループは変更しない
+3. タグDBが見つからない場合はボタンを無効化し、ツールチップで対応拡張(tagcomplete / プロンプト大辞典)を案内
+
+**影響ファイル**: `tagdb.py`(新設)、`api.py`、`store.ts`(照会アクション)、`PsmEditModal.vue`、`PsmSideBar.vue`、`i18n/*`、`tests/test_psm_tagdb.py`(新設)、`tests/store_prompt.spec.ts`
+
+### 6.3 将来拡張(スコープ外メモ)
+
+- タグの日本語注釈表示: 大辞典の `ja` フィールドを流用可能(tagdb.pyが既に保持する設計のため追加コスト小)
+- 配置ミスの常時lint表示(重複チェックと同様のハイライト機構の流用)
+
+## 7. 互換性・注意事項
 
 - `model_mode` / `isNatural` / `category` はすべて省略可能な追加フィールドのため、既存YAMLはそのまま読める(後方互換)
 - 旧バージョンPSMで新YAMLを開いた場合、未知フィールドが保存時に脱落する可能性があるため、`storage.py` は未知キーを保持する実装(dictパススルー)にしておくこと

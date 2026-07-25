@@ -33,6 +33,7 @@ import PsmGroupMap from "./components/PsmGroupMap.vue";
 import PsmGenerateConfirmDialog from "./components/PsmGenerateConfirmDialog.vue";
 import PsmDuplicateConfirmDialog from "./components/PsmDuplicateConfirmDialog.vue";
 import PsmSetupWizard from "./components/PsmSetupWizard.vue";
+import PsmPreviewModal from "./components/PsmPreviewModal.vue";
 import { useI18n } from "./composables/useI18n";
 
 const { t } = useI18n();
@@ -53,6 +54,7 @@ const dialogs = ref({
   generate: false,
   profileNew: false,
   profileDelete: false,
+  preview: false,
 });
 const newProfileNameInput = ref("");
 
@@ -570,6 +572,17 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
             </v-btn>
           </div>
           <v-btn
+            variant="outlined"
+            size="small"
+            class="ml-2"
+            @click.stop="dialogs.preview = true"
+            :title="t('previewTitle')"
+            data-testid="open-preview-btn"
+          >
+            <v-icon start size="small">mdi-eye-outline</v-icon>
+            {{ t('previewBtn') }}
+          </v-btn>
+          <v-btn
             color="secondary"
             variant="elevated"
             size="small"
@@ -615,6 +628,11 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 
       <PsmEditModal />
       <PsmDeleteDialog />
+
+      <PsmPreviewModal
+        v-model="dialogs.preview"
+        @apply="handleApplyWithCheck"
+      />
 
       <PsmContextMenu
         v-model:show="contextMenu.show"

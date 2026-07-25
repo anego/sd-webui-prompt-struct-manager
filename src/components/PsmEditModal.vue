@@ -4,7 +4,7 @@
  * グループおよびプロンプトの新規作成・編集を行います。
  */
 import { computed, ref, watch, nextTick, onUnmounted } from "vue";
-import { state, finishEdit, cancelEdit, startDeleteConfirm, translateText } from "../store";
+import { state, finishEdit, cancelEdit, startDeleteConfirm, translateText, suggestCategoryForGroup } from "../store";
 import PsmModal from "./PsmModal.vue";
 import { useI18n } from "../composables/useI18n";
 
@@ -31,6 +31,53 @@ const HEADER_COLOR_PRESETS = [
 const onCustomColor = (e: Event) => {
   const v = (e.target as HTMLInputElement).value;
   if (state.editingItem) state.editingItem.headerColor = v;
+};
+
+// ---- カテゴリ自動判定 (Phase 5B) ----
+
+const isAutoCat = ref(false);
+const autoCatHint = ref("");
+
+/** カテゴリ値 → 短縮表示名のi18nキー */
+const CAT_SHORT_KEY: Record<string, string> = {
+  quality: "catShortQuality",
+  subject: "catShortSubject",
+  character: "catShortCharacter",
+  series: "catShortSeries",
+  artist: "catShortArtist",
+  general: "catShortGeneral",
+};
+
+/**
+ * グループ配下のタグをタグDBで判定し、多数決でカテゴリを提案する
+ * (完了ボタンを押すまで保存はされない)
+ */
+const onAutoDetectCategory = async () => {
+  const item = state.editingItem;
+  if (!item || !item.is_group || isAutoCat.value) return;
+  isAutoCat.value = true;
+  autoCatHint.value = "";
+  try {
+    const s = await suggestCategoryForGroup(item);
+    if (!s.total) {
+      autoCatHint.value = t("autoCatEmpty");
+      return;
+    }
+    if (s.suggested) {
+      item.category = s.suggested;
+    }
+    const parts = Object.entries(s.counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, n]) => `${t(CAT_SHORT_KEY[c] || "catShortGeneral")}${n}`);
+    if (s.unknown > 0) {
+      parts.push(`${t("autoCatUnknown")}${s.unknown}`);
+    }
+    autoCatHint.value = t("autoCatBreakdown", { total: String(s.total), parts: parts.join(" / ") });
+  } catch (e) {
+    autoCatHint.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    isAutoCat.value = false;
+  }
 };
 
 /**
@@ -263,6 +310,10 @@ watch(
   () => state.isEditing,
   async (val) => {
     if (val) {
+      // 前回のインライン表示をリセット
+      autoCatHint.value = "";
+      translateError.value = "";
+
       // モーダルが開く前に大辞典の存在を事前検知し、モーダルの初期幅を決定する
       state.hasDictionary = checkDictionaryPresence();
 
@@ -405,6 +456,20 @@ const modalTitle = computed(() => {
               data-testid="edit-category-select"
               @update:model-value="(v) => state.editingItem!.category = v"
             ></v-select>
+
+            <!-- Auto Category Detection (Phase 5B) -->
+            <div v-if="state.editingItem.is_group" class="d-flex align-center ga-2 mb-2 flex-wrap">
+              <v-btn
+                size="small"
+                variant="tonal"
+                color="teal"
+                prepend-icon="mdi-auto-fix"
+                :loading="isAutoCat"
+                @click="onAutoDetectCategory"
+                data-testid="auto-category-btn"
+              >{{ t('autoCatBtn') }}</v-btn>
+              <span v-if="autoCatHint" class="text-caption text-grey">{{ autoCatHint }}</span>
+            </div>
 
             <!-- Header Color Picker for Groups -->
             <div v-if="state.editingItem.is_group" class="mb-2">
