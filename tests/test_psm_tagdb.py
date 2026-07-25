@@ -175,3 +175,78 @@ class TestTagDbApi:
         response = test_client.get("/psm/tagdb-status")
         assert response.status_code == 200
         assert response.json()["available"] is True
+
+
+# -------------------------------------------------------------------------
+# 一般タグのサブ分類 (subcategory)
+# -------------------------------------------------------------------------
+
+class TestSubcategory:
+    """タグDBを必要としない純粋な文字列判定のため、フィクスチャ不要"""
+
+    @pytest.mark.parametrize("tag,expected", [
+        ("long hair", "hair"),
+        ("blue eyes", "face"),
+        ("smile", "face"),
+        ("large breasts", "body"),
+        ("school uniform", "clothing"),
+        ("thighhighs", "clothing"),
+        ("hair ornament", "accessory"),   # hairより先にaccessoryへ
+        ("hairband", "accessory"),
+        ("sitting", "pose"),
+        ("from behind", "composition"),
+        ("looking at viewer", "composition"),
+        ("upper body", "composition"),
+        ("outdoors", "background"),
+        ("backlighting", "lighting"),
+        ("watercolor (medium)", "style"),
+        ("motion blur", "effect"),
+        ("flower", "object"),
+        ("speech bubble", "text"),
+    ])
+    def test_basic_classification(self, tag: str, expected: str) -> None:
+        assert tagdb.subcategory(tag) == expected
+
+    @pytest.mark.parametrize("tag", ["hearing", "1girl", "solo", "virtual youtuber"])
+    def test_unclassified(self, tag: str) -> None:
+        """該当しないタグは None を返すこと (人数タグ等は上位カテゴリで扱う)"""
+        assert tagdb.subcategory(tag) is None
+
+    def test_word_boundary(self) -> None:
+        """部分語での誤一致を防ぐこと (chair -> hair とならない)"""
+        assert tagdb.subcategory("armchair") != "hair"
+        assert tagdb.subcategory("hearing") is None
+
+    @pytest.mark.parametrize("tag,expected", [
+        ("earrings", "accessory"),   # 複数形
+        ("eyes", "face"),
+        ("legs", "body"),
+        ("clouds", "background"),
+    ])
+    def test_plural_forms(self, tag: str, expected: str) -> None:
+        assert tagdb.subcategory(tag) == expected
+
+    @pytest.mark.parametrize("tag", [":d", ";)", "^_^", ">_<", "@_@"])
+    def test_emoticon_tags(self, tag: str) -> None:
+        """顔文字タグは表情として扱うこと"""
+        assert tagdb.subcategory(tag) == "face"
+
+    def test_normalization(self) -> None:
+        """大文字・アンダースコア・前後空白を正規化して判定すること"""
+        assert tagdb.subcategory("Long_Hair") == "hair"
+        assert tagdb.subcategory("  blue eyes  ") == "face"
+
+    def test_invalid_input(self) -> None:
+        assert tagdb.subcategory("") is None
+        assert tagdb.subcategory(None) is None  # type: ignore[arg-type]
+
+    def test_api_returns_subcategories(self, test_client: TestClient, tagdb_env: Path) -> None:
+        """/psm/tag-categories がサブ分類も返すこと (既存フィールドは維持)"""
+        response = test_client.post("/psm/tag-categories", json={
+            "tags": ["long hair", "1girl", "unknown_tag_xyz"]
+        })
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["categories"]["1girl"] == "subject"          # 既存フィールド
+        assert data["subcategories"]["long hair"] == "hair"      # 追加フィールド
+        assert data["subcategories"]["unknown_tag_xyz"] is None

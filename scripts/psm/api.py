@@ -211,9 +211,12 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
                 return JSONResponse(content={"status": "error", "message": "tags が空です。"})
 
             categories = tagdb.lookup(tags)
+            # 一般タグのサブ分類 (取込時の細分化用。該当なしは null)
+            subcategories = {t: tagdb.subcategory(t) for t in categories.keys()}
             return JSONResponse(content={
                 "status": "success",
                 "categories": categories,
+                "subcategories": subcategories,
                 "source": tagdb._source,
             })
         except RuntimeError as e:

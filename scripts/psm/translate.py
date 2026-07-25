@@ -149,15 +149,20 @@ def _translate_openai(text: str, cfg: Dict) -> str:
 def _translate_deepl(text: str, cfg: Dict) -> str:
     """
     DeepL API (v2/translate) による翻訳。model / system_prompt は使用しません。
+    翻訳先言語は cfg["target_lang"] で指定できます (既定: EN)。
     """
     endpoint = validate_endpoint(cfg.get("endpoint"))
     api_key = (cfg.get("api_key") or "").strip()
     if not api_key:
         raise TranslateError("DeepLのAPIキーが設定されていません。")
 
+    target_lang = (cfg.get("target_lang") or "EN").strip().upper()
+    if not re.match(r"^[A-Z]{2}(-[A-Z]{2})?$", target_lang):
+        raise TranslateError(f"翻訳先言語の指定が不正です: {target_lang}")
+
     resp = requests.post(
         f"{endpoint}/translate",
-        json={"text": [text], "target_lang": "EN"},
+        json={"text": [text], "target_lang": target_lang},
         headers={
             "Content-Type": "application/json",
             "Authorization": f"DeepL-Auth-Key {api_key}",

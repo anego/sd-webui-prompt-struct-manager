@@ -692,6 +692,644 @@ describe("状態スナップショット「プロファイル」機能", () => {
 });
 
 // -------------------------------------------------------------------------
+// 12. PNG Info (infotext) 取込のテスト
+// -------------------------------------------------------------------------
+import {
+  parseInfotext,
+  parsePromptToItems,
+  importInfotext,
+  groupItemsByCategory,
+  translateTagNames,
+  applyTranslatedNames,
+} from "../src/store";
+
+const SAMPLE_INFOTEXT = `masterpiece, best quality, 1girl, (smile:1.2), <lora:my_style_v2:0.8>
+Negative prompt: worst quality, low quality, bad anatomy
+Steps: 30, Sampler: Euler a, Schedule type: Automatic, CFG scale: 4.5, Seed: 1234567890, Size: 896x1152, Model hash: abc123, Model: anima-preview3`;
+
+describe("parseInfotext - PNG Info の解析", () => {
+  it("12.1 Positive / Negative / パラメータを正しく分離すること", () => {
+    // Act
+    const p = parseInfotext(SAMPLE_INFOTEXT);
+
+    // Assert
+    expect(p.positive).toBe("masterpiece, best quality, 1girl, (smile:1.2), <lora:my_style_v2:0.8>");
+    expect(p.negative).toBe("worst quality, low quality, bad anatomy");
+    expect(p.params["Steps"]).toBe("30");
+    expect(p.params["Sampler"]).toBe("Euler a");
+    expect(p.params["CFG scale"]).toBe("4.5");
+    expect(p.params["Size"]).toBe("896x1152");
+    expect(p.params["Model"]).toBe("anima-preview3");
+  });
+
+  it("12.2 Negative prompt が無い場合も解析できること", () => {
+    const p = parseInfotext("1girl, solo\nSteps: 20, Sampler: Euler");
+    expect(p.positive).toBe("1girl, solo");
+    expect(p.negative).toBe("");
+    expect(p.params["Steps"]).toBe("20");
+  });
+
+  it("12.3 パラメータ行が無い (プロンプトのみ) 場合も解析できること", () => {
+    const p = parseInfotext("1girl, solo");
+    expect(p.positive).toBe("1girl, solo");
+    expect(p.negative).toBe("");
+    expect(p.params).toEqual({});
+  });
+
+  it("12.4 複数行のプロンプトを保持すること", () => {
+    const p = parseInfotext("line one, tag\nline two, tag2\nNegative prompt: neg1,\nneg2\nSteps: 20");
+    expect(p.positive).toBe("line one, tag\nline two, tag2");
+    expect(p.negative).toBe("neg1,\nneg2");
+  });
+
+  it("12.5 空文字を安全に扱えること", () => {
+    expect(parseInfotext("")).toEqual({ positive: "", negative: "", params: {} });
+    expect(parseInfotext("   ")).toEqual({ positive: "", negative: "", params: {} });
+  });
+});
+
+describe("parsePromptToItems - プロンプト文字列のツリー化", () => {
+  it("12.6 カンマ区切りでアイテム化し、明示的な重みを weight に反映すること", () => {
+    // Act
+    const items = parsePromptToItems("masterpiece, (smile:1.2), (bad:0.8)");
+
+    // Assert
+    expect(items.map((i) => i.content)).toEqual(["masterpiece", "smile", "bad"]);
+    expect(items.map((i) => i.weight)).toEqual([1.0, 1.2, 0.8]);
+  });
+
+  it("12.7 括弧の重ねがけを 1.1^n で概算すること", () => {
+    const items = parsePromptToItems("((detailed)), [dark]");
+    expect(items[0].content).toBe("detailed");
+    expect(items[0].weight).toBeCloseTo(1.21, 2);
+    expect(items[1].content).toBe("dark");
+    expect(items[1].weight).toBeCloseTo(0.91, 2);
+  });
+
+  it("12.8 エスケープされた括弧を復元すること (出力時に再エスケープされるため)", () => {
+    const items = parsePromptToItems("smile \\(showing teeth\\)");
+    expect(items[0].content).toBe("smile (showing teeth)");
+  });
+
+  it("12.9 LoRA構文・ワイルドカード・BREAK をそのまま保持すること", () => {
+    const items = parsePromptToItems("<lora:my_style_v2:0.8>, __character__, BREAK, 1girl");
+    expect(items.map((i) => i.content)).toEqual([
+      "<lora:my_style_v2:0.8>", "__character__", "BREAK", "1girl",
+    ]);
+    // 重みは変更されないこと
+    expect(items.every((i) => i.weight === 1.0)).toBe(true);
+  });
+
+  it("12.10 長文・句点で終わる文は自然言語アイテムとして取り込むこと", () => {
+    const items = parsePromptToItems("1girl, An anime girl with long hair is standing.");
+    expect(items[0].isNatural).toBeUndefined();
+    expect(items[1].isNatural).toBe(true);
+  });
+
+  it("12.11 IDが一意であること", () => {
+    const items = parsePromptToItems(Array.from({ length: 50 }, (_, i) => `tag${i}`).join(", "));
+    expect(new Set(items.map((i) => i.id)).size).toBe(50);
+  });
+});
+
+describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", () => {
+  it("12.16 番号付きリストで一括翻訳し、元の配列順に対応付けること", async () => {
+    // Arrange
+    state.translateSettings = defaultTranslateSettings();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "success", text: "1. 女の子1人\n2. ロングヘア\n3. 笑顔" }),
+    } as Response);
+
+    // Act
+    const names = await translateTagNames(["1girl", "long hair", "smile"]);
+
+    // Assert
+    expect(names).toEqual(["女の子1人", "ロングヘア", "笑顔"]);
+    // 英語→日本語用のシステムプロンプトと target_lang が送られること
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.config.target_lang).toBe("JA");
+    expect(body.config.system_prompt).toContain("Japanese");
+    expect(body.text).toBe("1. 1girl\n2. long hair\n3. smile");
+    expect(state.isTranslating).toBe(false);
+  });
+
+  it("12.17 番号が欠落・ズレた行は無視し、対応が取れた分のみ返すこと", async () => {
+    // Arrange: 2番の行が欠落し、余計な説明行が混入したケース
+    state.translateSettings = defaultTranslateSettings();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "success", text: "Here you go:\n1. 女の子1人\n3. 笑顔" }),
+    } as Response);
+
+    // Act
+    const names = await translateTagNames(["1girl", "long hair", "smile"]);
+
+    // Assert
+    expect(names).toEqual(["女の子1人", "", "笑顔"]);
+  });
+
+  it("12.18 20件を超える場合は複数リクエストに分割すること", async () => {
+    // Arrange
+    state.translateSettings = defaultTranslateSettings();
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const body = JSON.parse((init as RequestInit).body as string);
+      const lines = body.text.split("\n").map((l: string) => {
+        const n = l.match(/^(\d+)\./)![1];
+        return `${n}. 訳${n}`;
+      });
+      return { ok: true, json: async () => ({ status: "success", text: lines.join("\n") }) } as Response;
+    });
+
+    // Act
+    const tags = Array.from({ length: 45 }, (_, i) => `tag${i}`);
+    const names = await translateTagNames(tags);
+
+    // Assert: 20+20+5 = 3リクエスト
+    expect(vi.mocked(fetch).mock.calls.length).toBe(3);
+    expect(names.length).toBe(45);
+    expect(names.every((n) => n.startsWith("訳"))).toBe(true);
+  });
+
+  it("12.19 applyTranslatedNames: 名前が空のタグアイテムのみ更新し、特殊構文・自然言語・既存名はスキップすること", async () => {
+    // Arrange
+    state.translateSettings = defaultTranslateSettings();
+    const items: PsmItem[] = [
+      { id: 1, name: "", content: "1girl", enabled: true, weight: 1, is_group: false },
+      { id: 2, name: "既存名", content: "smile", enabled: true, weight: 1, is_group: false },
+      { id: 3, name: "", content: "<lora:foo:0.8>", enabled: true, weight: 1, is_group: false },
+      { id: 4, name: "", content: "A girl stands.", enabled: true, weight: 1, is_group: false, isNatural: true },
+      {
+        id: 5, name: "グループ", content: "", enabled: true, weight: 1, is_group: true,
+        children: [{ id: 6, name: "", content: "long hair", enabled: true, weight: 1, is_group: false }],
+      },
+    ];
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "success", text: "1. 女の子1人\n2. ロングヘア" }),
+    } as Response);
+
+    // Act
+    const applied = await applyTranslatedNames(items);
+
+    // Assert: 対象は 1girl と (グループ配下の) long hair のみ
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.text).toBe("1. 1girl\n2. long hair");
+    expect(applied).toBe(2);
+    expect(items[0].name).toBe("女の子1人");
+    expect(items[1].name).toBe("既存名");          // 既存名は保持
+    expect(items[2].name).toBe("");                // LoRAはスキップ
+    expect(items[3].name).toBe("");                // 自然言語はスキップ
+    expect(items[4].children![0].name).toBe("ロングヘア");
+  });
+
+  it("12.21 importInfotext: 実行中はローディングオーバーレイが表示され、完了後に解除されること", async () => {
+    // Arrange
+    state.selectedFile = "target.yaml";
+    state.translateSettings = defaultTranslateSettings();
+    state.isLoading = false;
+    state.loadingCount = 0;
+    const seen: { isLoading: boolean; text: string }[] = [];
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      // 非同期処理の実行中の状態を記録する
+      seen.push({ isLoading: state.isLoading, text: state.loadingText });
+      if (String(url) === "/psm/translate") {
+        return { ok: true, json: async () => ({ status: "success", text: "1. 女の子1人\n2. ソロ" }) } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await importInfotext("1girl, solo", { translateNames: true });
+
+    // Assert: 処理中は isLoading=true かつ翻訳中のテキスト、完了後は解除
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((s) => s.isLoading)).toBe(true);
+    expect(seen[0].text).toBe("translatingNames");
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingCount).toBe(0);
+  });
+
+  it("12.22 bulkAssignCategories: 実行中もローディングが表示され、完了後に解除されること", async () => {
+    // Arrange
+    state.selectedFile = "bulk.yaml";
+    state.isLoading = false;
+    state.loadingCount = 0;
+    state.positive = [{
+      id: 1, name: "g", content: "", enabled: true, weight: 1, is_group: true,
+      children: [{ id: 2, name: "", content: "1girl", enabled: true, weight: 1, is_group: false }],
+    }];
+    state.negative = [];
+    let seenText = "";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (!seenText) seenText = state.loadingText;
+      if (String(url) === "/psm/tag-categories") {
+        return { ok: true, json: async () => ({ status: "success", categories: { "1girl": "subject" } }) } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await bulkAssignCategories();
+
+    // Assert
+    expect(seenText).toBe("detectingCategories");
+    expect(state.isLoading).toBe(false);
+    expect(state.loadingCount).toBe(0);
+  });
+
+  it("12.20 importInfotext: translateNames指定時に名前が設定され、失敗しても取込は継続すること", async () => {
+    // Arrange: 翻訳はエラー、保存は成功
+    state.selectedFile = "target.yaml";
+    state.translateSettings = defaultTranslateSettings();
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/translate") {
+        return { ok: true, json: async () => ({ status: "error", message: "接続できません" }) } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    const r = await importInfotext("1girl, solo", { translateNames: true });
+
+    // Assert: 名前は空だが取込は完了する
+    expect(r.posCount).toBe(2);
+    expect(r.translated).toBe(0);
+    expect(state.positive.map((i) => i.content)).toEqual(["1girl", "solo"]);
+  });
+});
+
+describe("importInfotext - 取込の適用", () => {
+  it("12.12 現在のツリーへ上書きし、保存されること", async () => {
+    // Arrange
+    state.selectedFile = "target.yaml";
+    state.positive = [];
+    state.negative = [];
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+
+    // Act
+    const r = await importInfotext(SAMPLE_INFOTEXT);
+
+    // Assert
+    expect(r.posCount).toBe(5);
+    expect(r.negCount).toBe(3);
+    expect(state.positive.map((i) => i.content)).toContain("masterpiece");
+    expect(state.negative.map((i) => i.content)).toContain("bad anatomy");
+    expect(r.params["Sampler"]).toBe("Euler a");
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+
+  it("12.13 カテゴリ別グループ化を指定するとカテゴリ順のグループが生成されること", async () => {
+    // Arrange
+    state.selectedFile = "target.yaml";
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "success",
+            categories: { "masterpiece": "quality", "1girl": "subject", "smile": "general" },
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await importInfotext("masterpiece, 1girl, smile", { groupByCategory: true });
+
+    // Assert: quality → subject → general の順にグループ化される
+    expect(state.positive.every((g) => g.is_group)).toBe(true);
+    expect(state.positive.map((g) => g.category)).toEqual(["quality", "subject", "general"]);
+    expect(state.positive[0].children!.map((c) => c.content)).toEqual(["masterpiece"]);
+  });
+
+  it("12.23 subdivideGeneral指定時、一般グループがサブ分類の入れ子グループへ細分化されること", async () => {
+    // Arrange: 一般タグを8件以上 (しきい値) 用意する
+    state.selectedFile = "target.yaml";
+    const generalTags = ["long hair", "blue eyes", "smile", "school uniform", "thighhighs", "sitting", "outdoors", "flower"];
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "success",
+            categories: Object.fromEntries(generalTags.map((t) => [t, "general"])),
+            subcategories: {
+              "long hair": "hair", "blue eyes": "face", "smile": "face",
+              "school uniform": "clothing", "thighhighs": "clothing",
+              "sitting": "pose", "outdoors": "background", "flower": "object",
+            },
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await importInfotext(generalTags.join(", "), { groupByCategory: true, subdivideGeneral: true });
+
+    // Assert: 一般グループ配下がサブグループ (顔・髪・服装・ポーズ・小物・背景) になる
+    expect(state.positive.length).toBe(1);
+    const general = state.positive[0];
+    expect(general.category).toBe("general");
+    expect(general.children!.every((c) => c.is_group)).toBe(true);
+    // SUBCAT_ORDER の順序で並ぶこと (face → hair → clothing → pose → object → background)
+    expect(general.children!.map((c) => c.name)).toEqual([
+      "顔・表情", "髪", "服装", "ポーズ・動作", "小物・シンボル", "背景・場所",
+    ]);
+    expect(general.children![0].children!.map((c) => c.content)).toEqual(["blue eyes", "smile"]);
+  });
+
+  it("12.24 一般タグがしきい値未満の場合は細分化しないこと", async () => {
+    // Arrange: 3件のみ
+    state.selectedFile = "target.yaml";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "success",
+            categories: { "long hair": "general", "smile": "general", "sitting": "general" },
+            subcategories: { "long hair": "hair", "smile": "face", "sitting": "pose" },
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await importInfotext("long hair, smile, sitting", { groupByCategory: true, subdivideGeneral: true });
+
+    // Assert: フラットなアイテムのまま
+    expect(state.positive[0].children!.every((c) => !c.is_group)).toBe(true);
+  });
+
+  it("12.25 サブ分類が実質できない場合 (ほぼ未分類) は細分化しないこと", async () => {
+    // Arrange: 8件すべてサブ分類なし
+    state.selectedFile = "target.yaml";
+    const tags = Array.from({ length: 8 }, (_, i) => `tag${i}`);
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "success",
+            categories: Object.fromEntries(tags.map((t) => [t, "general"])),
+            subcategories: Object.fromEntries(tags.map((t) => [t, null])),
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await importInfotext(tags.join(", "), { groupByCategory: true, subdivideGeneral: true });
+
+    // Assert: 「その他」1つだけのグループを作らず、フラットのまま
+    expect(state.positive[0].children!.every((c) => !c.is_group)).toBe(true);
+  });
+
+  it("12.14 タグDBが使えない場合はフラットな構成で取り込むこと (フォールバック)", async () => {
+    // Arrange
+    state.selectedFile = "target.yaml";
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url) === "/psm/tag-categories") {
+        return { ok: true, json: async () => ({ status: "error", message: "タグDBが見つかりません。" }) } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+
+    // Act
+    await importInfotext("masterpiece, 1girl", { groupByCategory: true });
+
+    // Assert: グループ化されず、フラットなアイテムとして取り込まれる
+    expect(state.positive.every((i) => !i.is_group)).toBe(true);
+    expect(state.positive.map((i) => i.content)).toEqual(["masterpiece", "1girl"]);
+  });
+
+  it("12.15 ファイル名指定時は新規ファイルとして保存されること", async () => {
+    // Arrange
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success", files: [] }) } as Response);
+
+    // Act
+    await importInfotext("1girl, solo", { fileName: "from_png" });
+
+    // Assert
+    const call = vi.mocked(fetch).mock.calls.find((c) => c[0] === "/psm/save-prompts");
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.file).toBe("from_png.yaml");
+    expect(JSON.stringify(body.positive)).toContain("1girl");
+    expect(state.selectedFile).toBe("from_png.yaml");
+  });
+});
+
+// -------------------------------------------------------------------------
+// 13. サブ分類の任意実行とAI分類のテスト
+// -------------------------------------------------------------------------
+import {
+  subdivideGroup,
+  classifyTagsWithAI,
+  resolveSubcategories,
+  canUseAiClassify,
+} from "../src/store";
+
+describe("サブ分類の任意実行とAI分類", () => {
+  const leaf = (content: string): PsmItem => ({
+    id: Math.random() * 1e9 | 0, name: "", content, enabled: true, weight: 1, is_group: false,
+  });
+
+  /** ルールベースAPIの応答を返すモック */
+  const mockRuleApi = (subcategories: Record<string, string | null>) => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/tag-categories") {
+        return { ok: true, json: async () => ({ status: "success", categories: {}, subcategories }) } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "success" }) } as Response;
+    });
+  };
+
+  it("13.1 subdivideGroup: グループ直下の葉アイテムをサブグループへ再編成すること", async () => {
+    // Arrange
+    state.selectedFile = "f.yaml";
+    const group: PsmItem = {
+      id: 1, name: "既存グループ", content: "", enabled: true, weight: 1, is_group: true,
+      children: ["long hair", "blue eyes", "smile", "school uniform", "thighhighs", "sitting", "outdoors", "flower"].map(leaf),
+    };
+    mockRuleApi({
+      "long hair": "hair", "blue eyes": "face", "smile": "face",
+      "school uniform": "clothing", "thighhighs": "clothing",
+      "sitting": "pose", "outdoors": "background", "flower": "object",
+    });
+
+    // Act
+    const created = await subdivideGroup(group);
+
+    // Assert
+    expect(created).toBe(6);
+    expect(group.children!.every((c) => c.is_group)).toBe(true);
+    expect(group.children!.map((c) => c.name)).toEqual([
+      "顔・表情", "髪", "服装", "ポーズ・動作", "小物・シンボル", "背景・場所",
+    ]);
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+
+  it("13.2 subdivideGroup: 既存のサブグループは位置を保って残ること", async () => {
+    // Arrange: 先頭に既存グループ、その後に葉アイテム8件
+    state.selectedFile = "f.yaml";
+    const existing: PsmItem = {
+      id: 99, name: "既存サブ", content: "", enabled: true, weight: 1, is_group: true, children: [leaf("keep")],
+    };
+    const group: PsmItem = {
+      id: 1, name: "親", content: "", enabled: true, weight: 1, is_group: true,
+      children: [existing, ...["long hair", "blue eyes", "smile", "school uniform", "thighhighs", "sitting", "outdoors", "flower"].map(leaf)],
+    };
+    mockRuleApi({
+      "long hair": "hair", "blue eyes": "face", "smile": "face",
+      "school uniform": "clothing", "thighhighs": "clothing",
+      "sitting": "pose", "outdoors": "background", "flower": "object",
+    });
+
+    // Act
+    await subdivideGroup(group);
+
+    // Assert: 既存グループが先頭のまま維持される
+    expect(group.children![0]).toBe(existing);
+    expect(group.children!.length).toBe(7); // 既存1 + サブグループ6
+  });
+
+  it("13.3 subdivideGroup: 対象が8件未満なら何もしないこと", async () => {
+    // Arrange
+    const group: PsmItem = {
+      id: 1, name: "小グループ", content: "", enabled: true, weight: 1, is_group: true,
+      children: ["long hair", "smile"].map(leaf),
+    };
+    const before = [...group.children!];
+
+    // Act
+    const created = await subdivideGroup(group);
+
+    // Assert
+    expect(created).toBe(0);
+    expect(group.children).toEqual(before);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("13.4 subdivideGroup: 自然言語・LoRA・BREAKは対象外で元の位置に残ること", async () => {
+    // Arrange
+    state.selectedFile = "f.yaml";
+    const nl: PsmItem = { ...leaf("A girl stands."), isNatural: true };
+    const lora = leaf("<lora:foo:0.8>");
+    const group: PsmItem = {
+      id: 1, name: "混在", content: "", enabled: true, weight: 1, is_group: true,
+      children: [nl, lora, ...["long hair", "blue eyes", "smile", "school uniform", "thighhighs", "sitting", "outdoors", "flower"].map(leaf)],
+    };
+    mockRuleApi({
+      "long hair": "hair", "blue eyes": "face", "smile": "face",
+      "school uniform": "clothing", "thighhighs": "clothing",
+      "sitting": "pose", "outdoors": "background", "flower": "object",
+    });
+
+    // Act
+    await subdivideGroup(group);
+
+    // Assert: 対象外アイテムは葉のまま残る (照会対象にも含まれない)
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.tags).not.toContain("<lora:foo:0.8>");
+    expect(body.tags).not.toContain("A girl stands.");
+    expect(group.children).toContain(nl);
+    expect(group.children).toContain(lora);
+  });
+
+  it("13.5 classifyTagsWithAI: 番号付き応答をキーへ対応付け、不正なキーは無視すること", async () => {
+    // Arrange
+    state.translateSettings = defaultTranslateSettings();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "success", text: "1. hair\n2. INVALID_KEY\n3. other\n4. clothing" }),
+    } as Response);
+
+    // Act
+    const r = await classifyTagsWithAI(["mystery tag a", "mystery tag b", "mystery tag c", "mystery tag d"]);
+
+    // Assert: 不正キーは未設定、other は null (分類なし) として扱う
+    expect(r["mystery tag a"]).toBe("hair");
+    expect(r["mystery tag b"]).toBeUndefined();
+    expect(r["mystery tag c"]).toBeNull();
+    expect(r["mystery tag d"]).toBe("clothing");
+    // 分類用のシステムプロンプトが使われること
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.config.system_prompt).toContain("classify");
+  });
+
+  it("13.6 resolveSubcategories: ルールで未分類のタグのみAIへ問い合わせること", async () => {
+    // Arrange
+    state.translateSettings = defaultTranslateSettings();
+    const aiCalls: string[][] = [];
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const body = JSON.parse((init as RequestInit).body as string);
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({
+            status: "success", categories: {},
+            subcategories: { "long hair": "hair", "mystery tag": null },
+          }),
+        } as Response;
+      }
+      // AI呼び出し
+      aiCalls.push(body.text.split("\n"));
+      return { ok: true, json: async () => ({ status: "success", text: "1. effect" }) } as Response;
+    });
+
+    // Act
+    const r = await resolveSubcategories(["long hair", "mystery tag"], true);
+
+    // Assert: AIへ渡されたのは未分類の1件のみ
+    expect(aiCalls.length).toBe(1);
+    expect(aiCalls[0]).toEqual(["1. mystery tag"]);
+    expect(r["long hair"]).toBe("hair");      // ルールの結果を維持
+    expect(r["mystery tag"]).toBe("effect");  // AIで補完
+  });
+
+  it("13.7 resolveSubcategories: AI失敗時はルールベースの結果のみ返すこと", async () => {
+    // Arrange
+    state.translateSettings = defaultTranslateSettings();
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/tag-categories") {
+        return {
+          ok: true,
+          json: async () => ({ status: "success", categories: {}, subcategories: { "long hair": "hair", "x": null } }),
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ status: "error", message: "接続できません" }) } as Response;
+    });
+
+    // Act
+    const r = await resolveSubcategories(["long hair", "x"], true);
+
+    // Assert
+    expect(r["long hair"]).toBe("hair");
+    expect(r["x"]).toBeNull();
+  });
+
+  it("13.8 canUseAiClassify: OpenAI互換のみ有効で、DeepLやモデル未設定では無効になること", () => {
+    // Arrange & Assert: 既定 (ローカル/Ollama) は有効
+    state.translateSettings = defaultTranslateSettings();
+    expect(canUseAiClassify()).toBe(true);
+
+    // モデル未設定は無効
+    state.translateSettings.local.model = "";
+    expect(canUseAiClassify()).toBe(false);
+
+    // DeepLは翻訳専用のため無効
+    state.translateSettings = defaultTranslateSettings();
+    state.translateSettings.local.provider = "deepl";
+    expect(canUseAiClassify()).toBe(false);
+  });
+});
+
+// -------------------------------------------------------------------------
 // 11. トークン数の概算 (estimateTokenCount) のテスト
 // -------------------------------------------------------------------------
 import { estimateTokenCount, CLIP_CHUNK_SIZE } from "../src/store";

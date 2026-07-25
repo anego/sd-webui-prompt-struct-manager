@@ -112,6 +112,24 @@ html body .psm-modal {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Loading Overlay (psm-loading-overlay)                                      */
+/* モーダル (.psm-modal__overlay) と同じ階層へTeleportし、その上に重ねる       */
+/* -------------------------------------------------------------------------- */
+html body .psm-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: $z-index-loading;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.6);
+  pointer-events: auto; /* 背後の操作をブロックする */
+}
+
 /* Global Vuetify Overlay fixes */
 html body .v-overlay-container,
 html body .psm-app-root .v-overlay-container {

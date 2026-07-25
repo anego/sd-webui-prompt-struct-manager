@@ -85,6 +85,8 @@ export const state = reactive({
   translateSettings: null as TranslateSettings | null,
   /** 翻訳リクエスト実行中フラグ */
   isTranslating: false,
+  /** バッチ翻訳の進捗 (タグ名の日本語化用) */
+  translateProgress: { done: 0, total: 0 },
   /** ローディング多重度カウンタ */
   loadingCount: 0,
 });
@@ -893,6 +895,113 @@ export const translateText = async (text: string): Promise<string> => {
   }
 };
 
+// -------------------------------------------------------------------------
+// タグ名の日本語化 (英語 → 日本語のバッチ翻訳)
+// -------------------------------------------------------------------------
+
+/** タグ名翻訳用のシステムプロンプト (プロファイルのsystem_promptを上書きして使用) */
+const NAME_TRANSLATE_SYSTEM_PROMPT =
+  "You translate English image-generation tags into Japanese. " +
+  "The user gives a numbered list. Output ONLY the translations, one per line, " +
+  "in the exact format 'N. 翻訳' keeping the same numbering and order. " +
+  "Keep each translation short (a noun phrase). No explanations, no extra lines.";
+
+/** 1リクエストあたりのタグ数 (多すぎると番号ズレ・欠落が起きやすいため小分けにする) */
+const NAME_TRANSLATE_CHUNK = 20;
+
+/**
+ * 英語タグの配列を日本語へバッチ翻訳する
+ * 番号付きリストで一括依頼し、行頭番号で元の配列に対応付ける。
+ * 対応が取れなかった要素は空文字を返す (呼び出し側でスキップする)
+ */
+export const translateTagNames = async (tags: string[]): Promise<string[]> => {
+  const profile = getActiveTranslateProfile();
+  const result: string[] = new Array(tags.length).fill("");
+
+  state.translateProgress = { done: 0, total: tags.length };
+  state.isTranslating = true;
+  try {
+    for (let start = 0; start < tags.length; start += NAME_TRANSLATE_CHUNK) {
+      const chunk = tags.slice(start, start + NAME_TRANSLATE_CHUNK);
+      const numbered = chunk.map((t, i) => `${i + 1}. ${t}`).join("\n");
+
+      const res = await fetch("/psm/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: numbered,
+          config: {
+            ...profile,
+            // タグ名は英語→日本語なので、翻訳方向を上書きする
+            system_prompt: NAME_TRANSLATE_SYSTEM_PROMPT,
+            target_lang: "JA",
+          },
+        }),
+      });
+      if (!res.ok) throw apiHttpError(res.status, "/psm/translate");
+      const data = await res.json();
+      if (data.status !== "success" || !data.text) {
+        throw new Error(data.message || "翻訳に失敗しました。");
+      }
+
+      // 行頭の番号で対応付ける (番号が無い/ズレた行は無視する)
+      for (const line of String(data.text).split("\n")) {
+        const m = line.match(/^\s*(\d+)\s*[.):、]?\s*(.+?)\s*$/);
+        if (!m) continue;
+        const idx = parseInt(m[1], 10) - 1;
+        if (idx >= 0 && idx < chunk.length && !result[start + idx]) {
+          result[start + idx] = m[2].trim();
+        }
+      }
+
+      state.translateProgress = {
+        done: Math.min(start + chunk.length, tags.length),
+        total: tags.length,
+      };
+    }
+  } finally {
+    state.isTranslating = false;
+    state.translateProgress = { done: 0, total: 0 };
+  }
+
+  return result;
+};
+
+/**
+ * アイテム配列のタグを日本語訳して name (表示用) に設定する
+ * 既に名前があるアイテム・自然言語アイテム・特殊構文はスキップする
+ */
+export const applyTranslatedNames = async (items: PsmItem[]): Promise<number> => {
+  const isSpecial = (c: string) =>
+    /^<.+>$/.test(c) || /^__.+__$/.test(c) || /^break$/i.test(c);
+
+  // 対象アイテムを収集 (グループ配下も対象)
+  const targets: PsmItem[] = [];
+  const walk = (nodes: PsmItem[]) => {
+    for (const n of nodes) {
+      if (!n) continue;
+      if (n.is_group && n.children) walk(n.children);
+      else if (!n.is_group && !n.isNatural && !n.name?.trim() && n.content && !isSpecial(n.content.trim())) {
+        targets.push(n);
+      }
+    }
+  };
+  walk(items);
+  if (!targets.length) return 0;
+
+  const names = await translateTagNames(targets.map((t) => t.content.trim()));
+  let applied = 0;
+  targets.forEach((item, i) => {
+    const name = names[i];
+    if (name) {
+      item.name = name;
+      applied++;
+    }
+  });
+  Logger.info(`[Store/Translate] タグ名の日本語化を適用しました。(${applied}/${targets.length}件)`);
+  return applied;
+};
+
 /**
  * グローバル設定をサーバから読み込む（初期化時）
  */
@@ -1021,12 +1130,528 @@ const parsePrompts = (raw: string): PsmItem[] => {
     }));
 };
 
+// -------------------------------------------------------------------------
+// PNG Info / infotext の取込
+// -------------------------------------------------------------------------
+
+export interface ParsedInfotext {
+  positive: string;
+  negative: string;
+  /** Steps / Sampler / CFG scale などの生成パラメータ */
+  params: Record<string, string>;
+}
+
+/** 生成パラメータ行と判定するためのキー (この語で始まる行はパラメータ扱い) */
+const INFOTEXT_PARAM_HEAD = /^(Steps|Sampler|Schedule type|CFG scale|Seed|Size|Model|Denoising strength|Clip skip|Distilled CFG Scale|Hires|Version)\s*:/i;
+
+/**
+ * PNG Info (infotext) 文字列を解析する (純関数)
+ *
+ * 想定フォーマット:
+ *   <positive prompt (複数行可)>
+ *   Negative prompt: <negative prompt (複数行可)>
+ *   Steps: 20, Sampler: Euler a, CFG scale: 7, ...
+ *
+ * Negative prompt 行・パラメータ行はいずれも省略可能。
+ */
+export const parseInfotext = (raw: string): ParsedInfotext => {
+  const result: ParsedInfotext = { positive: "", negative: "", params: {} };
+  if (!raw || !raw.trim()) return result;
+
+  const lines = raw.replace(/\r\n?/g, "\n").split("\n");
+
+  // 末尾からパラメータ行を探す (最終行がパラメータ形式であれば分離する)
+  let paramLine = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (INFOTEXT_PARAM_HEAD.test(line)) {
+      paramLine = line;
+      lines.splice(i, 1);
+    }
+    break; // 空行以外を1つ見た時点で終了 (プロンプト途中の行は誤検出しない)
+  }
+
+  // Negative prompt 行で分割
+  const negIdx = lines.findIndex((l) => /^Negative prompt\s*:/i.test(l.trim()));
+  if (negIdx >= 0) {
+    result.positive = lines.slice(0, negIdx).join("\n").trim();
+    const firstNeg = lines[negIdx].replace(/^Negative prompt\s*:/i, "");
+    result.negative = [firstNeg, ...lines.slice(negIdx + 1)].join("\n").trim();
+  } else {
+    result.positive = lines.join("\n").trim();
+  }
+
+  // パラメータ行をパース (値内のカンマを含む "Size: 512x512" 等に配慮し key: value 単位で抽出)
+  if (paramLine) {
+    const re = /([A-Za-z][A-Za-z0-9 _.\-/]*?)\s*:\s*("[^"]*"|[^,]*)(?:,|$)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(paramLine)) !== null) {
+      const key = m[1].trim();
+      const value = m[2].trim().replace(/^"|"$/g, "");
+      if (key) result.params[key] = value;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * プロンプト文字列をPSMアイテム配列へ変換する (純関数)
+ *
+ * 対応:
+ * - 強調構文 `(tag:1.2)` → weight に反映 / `((tag))` `[tag]` → 1.1^n で概算
+ * - エスケープされた括弧 `\(` `\)` → 通常の括弧へ復元 (出力時に再エスケープされるため)
+ * - `<lora:...>` / `__wildcard__` / `BREAK` はそのまま1アイテムとして保持
+ * - 長文 (単語数が多い/句点で終わる) は自然言語アイテム (isNatural) として取り込む
+ */
+export const parsePromptToItems = (raw: string): PsmItem[] => {
+  if (!raw || !raw.trim()) return [];
+
+  let seq = 0;
+  const nextId = () => Date.now() * 1000 + ((seq++) % 1000);
+  const items: PsmItem[] = [];
+
+  for (const segment of raw.replace(/\r\n?/g, "\n").split(",")) {
+    let text = segment.trim().replace(/\n+/g, " ");
+    if (!text) continue;
+
+    let weight = 1.0;
+
+    // 保護対象 (LoRA・ワイルドカード・BREAK) はそのまま追加
+    const isSpecial = /^<.+>$/.test(text) || /^__.+__$/.test(text) || /^break$/i.test(text);
+
+    if (!isSpecial) {
+      // 明示的な重み指定 (tag:1.2)
+      const explicit = text.match(/^\((.+):\s*([\d.]+)\)$/);
+      if (explicit) {
+        text = explicit[1].trim();
+        weight = parseFloat(explicit[2]);
+      } else {
+        // 括弧の重ねがけ: ( ) は 1.1倍、[ ] は 1/1.1倍
+        let boost = 0;
+        let brackets = 0;
+        while (/^\((.*)\)$/.test(text) && !/\\\(/.test(text.slice(0, 2))) {
+          text = text.slice(1, -1).trim();
+          boost++;
+        }
+        while (/^\[(.*)\]$/.test(text)) {
+          text = text.slice(1, -1).trim();
+          brackets++;
+        }
+        if (boost || brackets) {
+          weight = Math.pow(1.1, boost) * Math.pow(1 / 1.1, brackets);
+          weight = Math.min(2.0, Math.max(0.1, Math.round(weight * 100) / 100));
+        }
+      }
+
+      // エスケープされた括弧を復元 (getCompiledPrompts が出力時に再エスケープする)
+      text = text.replace(/\\([()])/g, "$1");
+    }
+
+    if (!text) continue;
+
+    // 自然言語判定: 句点で終わる、または単語数が多い長文
+    const wordCount = text.split(/\s+/).length;
+    const isNatural = !isSpecial && (/[.!?]$/.test(text) || wordCount >= 6);
+
+    items.push({
+      id: nextId(),
+      name: "",
+      content: text,
+      enabled: true,
+      weight,
+      memo: "",
+      is_group: false,
+      ...(isNatural ? { isNatural: true } : {}),
+    });
+  }
+
+  return items;
+};
+
+/** 一般タグのサブグループ表示名 (バックエンドのSUBCATEGORY_RULESのキーに対応) */
+const SUBCAT_LABELS: Record<string, string> = {
+  hair: "髪",
+  face: "顔・表情",
+  body: "体・体型",
+  clothing: "服装",
+  accessory: "装飾品・小物",
+  pose: "ポーズ・動作",
+  composition: "構図・視点",
+  background: "背景・場所",
+  lighting: "光・色",
+  style: "画風・画材",
+  effect: "効果・演出",
+  object: "小物・シンボル",
+  text: "文字・注記",
+};
+
+/** サブグループの並び順 (未定義キーは末尾の「その他」へ) */
+const SUBCAT_ORDER = [
+  "composition", "face", "hair", "body", "clothing", "accessory",
+  "pose", "object", "background", "lighting", "style", "effect", "text",
+];
+
+/** 一般グループを細分化する最小件数 (これ未満なら細分化しない) */
+const SUBDIVIDE_THRESHOLD = 8;
+
+/**
+ * 一般カテゴリのアイテム群を、サブ分類ごとの入れ子グループへ再編成する
+ * 件数がしきい値未満、またはサブ分類が1種類しか無い場合はそのまま返す
+ */
+const subdivideGeneralItems = (
+  items: PsmItem[],
+  subcategories: Record<string, string | null>,
+  nextId: () => number
+): PsmItem[] => {
+  if (items.length < SUBDIVIDE_THRESHOLD) return items;
+
+  const buckets = new Map<string, PsmItem[]>();
+  for (const item of items) {
+    const key = subcategories[item.content] || "other";
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(item);
+  }
+
+  // 分類が実質できていない場合 (全て「その他」など) は細分化しない
+  const classified = [...buckets.keys()].filter((k) => k !== "other");
+  if (classified.length < 2) return items;
+
+  const order = [...SUBCAT_ORDER, "other"];
+  return order
+    .filter((k) => buckets.has(k))
+    .map((k) => ({
+      id: nextId(),
+      name: k === "other" ? "その他" : (SUBCAT_LABELS[k] || k),
+      content: "",
+      enabled: true,
+      weight: 1.0,
+      memo: "",
+      is_group: true,
+      isOpen: true,
+      children: buckets.get(k)!,
+    }));
+};
+
+/** AI分類で許可するサブ分類キー (バックエンドのSUBCATEGORY_RULESと対応) */
+export const SUBCAT_KEYS = [
+  "composition", "face", "hair", "body", "clothing", "accessory",
+  "pose", "object", "background", "lighting", "style", "effect", "text",
+];
+
+/** AIによるサブ分類のシステムプロンプト */
+const AI_CLASSIFY_SYSTEM_PROMPT =
+  "You classify image-generation tags into exactly one category. " +
+  `Allowed categories: ${SUBCAT_KEYS.join(", ")}, other. ` +
+  "The user gives a numbered list of tags. Output ONLY lines in the format 'N. category' " +
+  "keeping the same numbering and order. Use the exact category words above. " +
+  "Use 'other' when nothing fits. No explanations.";
+
+/** AI分類が利用可能か (OpenAI互換プロバイダのみ。DeepLは翻訳専用のため不可) */
+export const canUseAiClassify = (): boolean => {
+  const p = getActiveTranslateProfile();
+  return p.provider === "openai" && !!p.endpoint && !!p.model;
+};
+
+/**
+ * AI (ローカルLLM等) でタグをサブ分類する
+ * 20件ずつ番号付きリストで問い合わせ、許可キー以外の応答は null として扱う
+ */
+export const classifyTagsWithAI = async (tags: string[]): Promise<Record<string, string | null>> => {
+  const profile = getActiveTranslateProfile();
+  const result: Record<string, string | null> = {};
+  const allowed = new Set([...SUBCAT_KEYS, "other"]);
+
+  state.translateProgress = { done: 0, total: tags.length };
+  state.isTranslating = true;
+  try {
+    for (let start = 0; start < tags.length; start += NAME_TRANSLATE_CHUNK) {
+      const chunk = tags.slice(start, start + NAME_TRANSLATE_CHUNK);
+      const numbered = chunk.map((t, i) => `${i + 1}. ${t}`).join("\n");
+
+      const res = await fetch("/psm/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: numbered,
+          config: { ...profile, system_prompt: AI_CLASSIFY_SYSTEM_PROMPT },
+        }),
+      });
+      if (!res.ok) throw apiHttpError(res.status, "/psm/translate");
+      const data = await res.json();
+      if (data.status !== "success" || !data.text) {
+        throw new Error(data.message || "AI分類に失敗しました。");
+      }
+
+      for (const line of String(data.text).split("\n")) {
+        const m = line.match(/^\s*(\d+)\s*[.):、]?\s*([a-zA-Z]+)\s*$/);
+        if (!m) continue;
+        const idx = parseInt(m[1], 10) - 1;
+        const key = m[2].trim().toLowerCase();
+        if (idx >= 0 && idx < chunk.length && allowed.has(key)) {
+          result[chunk[idx]] = key === "other" ? null : key;
+        }
+      }
+
+      state.translateProgress = {
+        done: Math.min(start + chunk.length, tags.length),
+        total: tags.length,
+      };
+    }
+  } finally {
+    state.isTranslating = false;
+    state.translateProgress = { done: 0, total: 0 };
+  }
+
+  return result;
+};
+
+/**
+ * タグのサブ分類を解決する (ルールベース + 任意でAI補完)
+ * まずタグDBのルールで判定し、未分類のみAIへ問い合わせることでリクエストを最小化する
+ */
+export const resolveSubcategories = async (
+  tags: string[],
+  useAI = false
+): Promise<Record<string, string | null>> => {
+  const subcategories: Record<string, string | null> = {};
+
+  // 1. ルールベース (オフライン・高速)
+  try {
+    const res = await fetch("/psm/tag-categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "success") {
+        Object.assign(subcategories, data.subcategories || {});
+      }
+    }
+  } catch (e) {
+    Logger.warn("[Store/Subcategory] ルールベースのサブ分類取得に失敗しました。", e);
+  }
+
+  // 2. 未分類のみAIで補完
+  if (useAI && canUseAiClassify()) {
+    const unresolved = tags.filter((t) => !subcategories[t]);
+    if (unresolved.length) {
+      try {
+        const aiResult = await classifyTagsWithAI(unresolved);
+        for (const [tag, key] of Object.entries(aiResult)) {
+          if (key) subcategories[tag] = key;
+        }
+        Logger.info(`[Store/Subcategory] AIで${Object.values(aiResult).filter(Boolean).length}/${unresolved.length}件を補完しました。`);
+      } catch (e) {
+        Logger.warn("[Store/Subcategory] AIによるサブ分類に失敗したため、ルールベースの結果のみ使用します。", e);
+      }
+    }
+  }
+
+  return subcategories;
+};
+
+/**
+ * 既存グループの直下アイテムをサブ分類で入れ子グループへ再編成する (取込以外からの実行用)
+ * 直下のグループはそのままの位置に残す
+ * @returns 作成したサブグループ数 (0なら細分化しなかった)
+ */
+export const subdivideGroup = async (group: PsmItem, useAI = false): Promise<number> => {
+  if (!group.is_group || !group.children?.length) return 0;
+
+  const isSpecial = (c: string) =>
+    /^<.+>$/.test(c) || /^__.+__$/.test(c) || /^break$/i.test(c);
+
+  // 対象は直下の葉アイテム (自然言語・特殊構文は対象外)
+  const leaves = group.children.filter(
+    (c) => c && !c.is_group && !c.isNatural && c.content && !isSpecial(c.content.trim())
+  );
+  if (leaves.length < SUBDIVIDE_THRESHOLD) return 0;
+
+  startLoading(useAI ? "classifyingAi" : "detectingCategories");
+  let created = 0;
+  try {
+    const subcategories = await resolveSubcategories(leaves.map((l) => l.content.trim()), useAI);
+
+    let seq = 0;
+    const nextId = () => Date.now() * 1000 + 700 + ((seq++) % 300);
+    // content のキーで引けるよう、trim済みキーに揃えたマップを作る
+    const byContent: Record<string, string | null> = {};
+    for (const l of leaves) byContent[l.content] = subcategories[l.content.trim()] || null;
+
+    const subgroups = subdivideGeneralItems(leaves, byContent, nextId);
+    if (subgroups === leaves || subgroups.length === 0) return 0; // 細分化されなかった
+
+    // 元の並び順を保ちつつ、葉アイテムのあった位置にサブグループを差し込む
+    const newChildren: PsmItem[] = [];
+    let inserted = false;
+    for (const child of group.children) {
+      if (child && !child.is_group && leaves.includes(child)) {
+        if (!inserted) {
+          newChildren.push(...subgroups);
+          inserted = true;
+        }
+        continue; // 葉アイテムはサブグループ側へ移動済み
+      }
+      newChildren.push(child);
+    }
+    if (!inserted) newChildren.push(...subgroups);
+
+    group.children = newChildren;
+    group.isOpen = true;
+    created = subgroups.length;
+    state.selectedProfileName = "";
+    await savePrompts();
+  } finally {
+    stopLoading();
+  }
+  return created;
+};
+
+/**
+ * アイテム配列をカテゴリ別グループへ再編成する (Phase 5Bのタグ判定APIを利用)
+ * 判定できないタグ・特殊アイテムは「一般」グループへまとめる
+ * @param subdivideGeneral trueの場合、一般グループ内をさらにサブ分類で細分化する
+ * @param useAI trueの場合、ルールで未分類だったタグをAIで補完する
+ */
+export const groupItemsByCategory = async (items: PsmItem[], subdivideGeneral = false, useAI = false): Promise<PsmItem[]> => {
+  const tagItems = items.filter((i) => !i.isNatural && !/^<.+>$/.test(i.content) && !/^__.+__$/.test(i.content) && !/^break$/i.test(i.content));
+  if (!tagItems.length) return items;
+
+  let categories: Record<string, string> = {};
+  let subcategories: Record<string, string | null> = {};
+  const res = await fetch("/psm/tag-categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags: tagItems.map((i) => i.content) }),
+  });
+  if (!res.ok) throw apiHttpError(res.status, "/psm/tag-categories");
+  const data = await res.json();
+  if (data.status !== "success") throw new Error(data.message || "Tag DB unavailable");
+  categories = data.categories || {};
+  subcategories = data.subcategories || {};
+
+  // 一般グループを細分化する場合のみ、未分類タグをAIで補完する
+  if (subdivideGeneral && useAI && canUseAiClassify()) {
+    const generalTags = tagItems
+      .filter((i) => (categories[i.content] || "general") === "general" && !subcategories[i.content])
+      .map((i) => i.content);
+    if (generalTags.length) {
+      try {
+        const aiResult = await classifyTagsWithAI(generalTags);
+        for (const [tag, key] of Object.entries(aiResult)) {
+          if (key) subcategories[tag] = key;
+        }
+      } catch (e) {
+        Logger.warn("[Store/Infotext] AIによるサブ分類に失敗したため、ルールベースの結果のみ使用します。", e);
+      }
+    }
+  }
+
+  const CAT_LABELS: Record<PsmCategory, string> = {
+    quality: "品質・メタ",
+    subject: "主体",
+    character: "キャラクター",
+    series: "作品",
+    artist: "絵師",
+    general: "一般",
+  };
+
+  let seq = 0;
+  const nextId = () => Date.now() * 1000 + 500 + ((seq++) % 500);
+  const buckets = new Map<PsmCategory, PsmItem[]>();
+
+  for (const item of items) {
+    const cat = (categories[item.content] || "general") as PsmCategory;
+    const key: PsmCategory = CATEGORY_ORDER.includes(cat) ? cat : "general";
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(item);
+  }
+
+  // カテゴリ優先度順にグループを生成する
+  return CATEGORY_ORDER
+    .filter((c) => buckets.has(c))
+    .map((c) => {
+      const children = buckets.get(c)!;
+      return {
+        id: nextId(),
+        name: CAT_LABELS[c],
+        content: "",
+        enabled: true,
+        weight: 1.0,
+        memo: "",
+        is_group: true,
+        isOpen: true,
+        category: c,
+        // 「一般」は肥大化しやすいため、指定時のみサブ分類で細分化する
+        children: (subdivideGeneral && c === "general")
+          ? subdivideGeneralItems(children, subcategories, nextId)
+          : children,
+      };
+    });
+};
+
+/**
+ * infotextを取り込み、現在のツリーへ反映または新規ファイルとして保存する
+ * @param text 貼り付けられたPNG Info文字列
+ * @param opts groupByCategory: カテゴリ別グループ化 / translateNames: タグ名を日本語訳して名前に設定 / fileName: 指定時は新規ファイル作成
+ */
+export const importInfotext = async (
+  text: string,
+  opts: { groupByCategory?: boolean; subdivideGeneral?: boolean; useAiSubdivide?: boolean; translateNames?: boolean; fileName?: string } = {}
+): Promise<{ params: Record<string, string>; posCount: number; negCount: number; translated: number }> => {
+  const parsed = parseInfotext(text);
+  let positive = parsePromptToItems(parsed.positive);
+  let negative = parsePromptToItems(parsed.negative);
+  const posCount = positive.length;
+  const negCount = negative.length;
+  let translated = 0;
+
+  // 翻訳を含む場合は時間がかかるため、操作不可のローディングオーバーレイを表示する
+  startLoading(opts.translateNames ? "translatingNames" : "importing");
+  try {
+    if (opts.translateNames) {
+      // 翻訳に失敗しても取込自体は継続する (名前が空のままになるだけ)
+      try {
+        translated = await applyTranslatedNames([...positive, ...negative]);
+      } catch (e) {
+        Logger.warn("[Store/Infotext] タグ名の日本語化に失敗したため、名前を空のまま取り込みます。", e);
+      }
+    }
+
+    if (opts.groupByCategory) {
+      // カテゴリ判定に失敗した場合はグループ化せずフラットなまま取り込む
+      try {
+        positive = await groupItemsByCategory(positive, opts.subdivideGeneral, opts.useAiSubdivide);
+        negative = await groupItemsByCategory(negative, opts.subdivideGeneral, opts.useAiSubdivide);
+      } catch (e) {
+        Logger.warn("[Store/Infotext] カテゴリ別グループ化に失敗したため、フラットな構成で取り込みます。", e);
+      }
+    }
+
+    if (opts.fileName) {
+      await createYamlWithData(opts.fileName, positive, negative);
+    } else {
+      state.positive = positive;
+      state.negative = negative;
+      state.selectedProfileName = "";
+      await savePrompts();
+    }
+  } finally {
+    stopLoading();
+  }
+
+  return { params: parsed.params, posCount, negCount, translated };
+};
+
 export const createYamlWithData = async (n: string, pos: PsmItem[], neg: PsmItem[]) => {
   const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
   await fetch("/psm/save-prompts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: fn, positive: pos, negative: neg }),
+    body: JSON.stringify({ file: fn, positive: pos, negative: neg, model_mode: state.modelMode }),
   });
   await listFiles();
   state.selectedFile = fn;
@@ -1391,23 +2016,30 @@ export const bulkAssignCategories = async (): Promise<{ applied: number; skipped
   const counts: Record<string, number> = {};
 
   const roots = [...state.positive, ...state.negative].filter((n) => n && n.is_group);
-  for (const g of roots) {
-    if (g.category) {
-      skipped++;
-      continue;
-    }
-    const s = await suggestCategoryForGroup(g);
-    if (s.suggested) {
-      g.category = s.suggested;
-      counts[s.suggested] = (counts[s.suggested] || 0) + 1;
-      applied++;
-    } else {
-      skipped++;
-    }
-  }
 
-  if (applied > 0) {
-    await savePrompts();
+  // グループ数に応じて複数回APIを呼ぶため、操作不可のローディングを表示する
+  startLoading("detectingCategories");
+  try {
+    for (const g of roots) {
+      if (g.category) {
+        skipped++;
+        continue;
+      }
+      const s = await suggestCategoryForGroup(g);
+      if (s.suggested) {
+        g.category = s.suggested;
+        counts[s.suggested] = (counts[s.suggested] || 0) + 1;
+        applied++;
+      } else {
+        skipped++;
+      }
+    }
+
+    if (applied > 0) {
+      await savePrompts();
+    }
+  } finally {
+    stopLoading();
   }
   return { applied, skipped, counts };
 };

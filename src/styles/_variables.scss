@@ -46,6 +46,8 @@ $z-index-autocomplete: 2500;
 $z-index-app: 10000;
 $z-index-overlay: 20000;
 $z-index-modal: 2000000000;
+// ローディングは操作をブロックするため、モーダルより上に表示する
+$z-index-loading: 2000000500;
 
 // Typography
 $font-size-xs: 0.75rem;

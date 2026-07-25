@@ -45,12 +45,22 @@
   - This is an estimate only (exact counts depend on the model's tokenizer). Anima uses a different tokenizer (Qwen3) with no chunk concept, so chunk info is omitted.
 - **Apply from preview:** The "Apply Now" button runs the normal apply flow (including duplicate checking).
 
-### 1.6 Duplicate Detection
+### 1.6 Subcategory Auto-Grouping (on demand)
+- **How to run:** Right-click a group → "Group by subcategory". The tag items **directly under** that group are reorganized into Hair / Clothing / Pose / etc. subgroups (the same 13 categories + Other used on import; see §3.2).
+- **Existing structure is preserved:** Existing subgroups stay in place; only leaf items are grouped. Natural language items, `<lora:...>`, wildcards, and `BREAK` are excluded and keep their positions.
+- **Conditions:** Reorganization happens only when there are at least 8 target tags directly under the group and at least 2 distinct subcategories are detected (otherwise a message is shown and nothing changes).
+- **AI assistance:** When an OpenAI-compatible backend (LM Studio / Ollama, etc.) is configured in the translation settings, an additional "Group by subcategory (with AI)" entry appears.
+  - **Hybrid approach:** Rules run first, and **only the tags they could not classify** are sent to the local LLM (in batches of 20), keeping requests and latency low while covering tags the rules miss.
+  - Only allowed category keys are accepted from the AI; invalid responses or failures fall back to the rule-based results (processing is never aborted).
+  - A blocking loading overlay with progress is shown while running.
+- The PNG Info import dialog offers the same AI option ("Use AI for unclassified tags").
+
+### 1.7 Duplicate Detection
 - **Auto Detection:** Automatically detects and highlights duplicate prompts that have the exact same text within the tree.
 - **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
 - **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks.
 
-### 1.7 Prompt Dictionary Dual-way Integration
+### 1.8 Prompt Dictionary Dual-way Integration
 - **Portal Teleportation:** Upon opening the prompt editing modal, the DOM element of the "Prompt Dictionary on SDwebUI" extension is immediately detected and teleported (appendChild) into the modal's portal placeholder without any lag.
 - **Click Interception & Tag Insertion:** While editing, clicking the dictionary's "Insert" button will safely append the selected tags as comma-separated values into the PSM modal's text area instead of pasting them into the main WebUI prompt fields.
 - **Two-Column Layout with Independent Scroll:** When the dictionary integration is active, the modal width automatically expands to `1100px` (2 columns: PSM Edit form on the left, Dictionary search on the right). The dictionary area has independent vertical scrolling, preventing the modal action buttons (Save/Cancel/Delete) from being hidden at the bottom.
@@ -98,20 +108,42 @@
 - **Multi-file Management:** Create multiple YAML files for different purposes and switch between them via a dropdown.
 - **File Operations:** Create New, Duplicate, Rename, Delete.
 
-### 3.2 Profiles (State Snapshot)
+### 3.2 PNG Info (infotext) Import
+- **Overview:** Use the image icon in the toolbar to paste a generation parameters string (the contents of the PNG Info tab) and import it as a structured prompt tree.
+- **Automatic parsing:** Detects the positive prompt, the `Negative prompt:` line, and the settings line (`Steps: 20, Sampler: ...`). Multi-line prompts and inputs without a negative/settings line are supported.
+- **Syntax parsing and restoration:**
+  - Attention syntax `(smile:1.2)` is imported as a weight value. Nested brackets such as `((detailed))` and `[dark]` are approximated as `1.1^n`.
+  - Escaped parentheses `\(...\)` are restored to plain parentheses (they are re-escaped on output, so the original text round-trips).
+  - `<lora:...>`, wildcards `__name__`, and `BREAK` are preserved as single items without being split.
+  - Sentences ending with punctuation or containing many words are imported as "natural language items" automatically.
+- **Group by category:** Enabling "Group by category" sorts tags into Quality / Subject / Character / Series / Artist / General groups using the tag DB (tagcomplete). Defaults to ON in Anima mode; falls back to a flat structure when the tag DB is unavailable.
+- **Subdividing the "General" group:** Since most Danbooru tags fall under `general`, that group grows large. The "Subdivide General into hair, clothing, etc." option (ON by default) sorts them into subgroups.
+  - Subcategories: Composition / Face & Expression / Hair / Body / Clothing / Accessory / Pose / Object & Symbol / Background / Lighting & Color / Style & Medium / Effect / Text — plus "Other" (13 + 1).
+  - Classification is keyword-based on the tag text, with word-boundary checks (so `chair` does not match `hair`) and plural handling (`earrings` resolves). Emoticon tags such as `^_^` and `:d` are classified as Face & Expression.
+  - No subdivision occurs when there are fewer than 8 general tags, or when effectively only one subcategory is detected.
+  - Measured classification rate on the top 1000 Danbooru general tags is roughly 75% (most of the remainder are count/subject tags handled by the top-level categories).
+- **Translate tag names:** Enabling "Translate tag names into the Name field" uses the translation backend (settings from §4.3) to translate English tags and store the result in each item's display Name.
+  - Tags are translated in numbered batches of 20, keeping request counts low even for large prompts.
+  - While running, the same blocking loading overlay used for file loading is shown, including translation progress (`12 / 45` with a progress bar).
+  - The translation direction switches to English→Japanese automatically (`target_lang=JA` for DeepL, a dedicated system prompt for OpenAI-compatible backends).
+  - Only tag items with an empty name are targeted. Items that already have a name, natural language items, `<lora:...>`, wildcards, and `BREAK` are skipped.
+  - If translation fails or a numbered line cannot be matched, that item's name is left empty and the import still completes.
+- **Import target:** Choose between overwriting the current file or creating a new one. Tag counts and generation parameters are previewed live inside the dialog.
+
+### 3.3 Profiles (State Snapshot)
 - **Feature Overview:** Save the active/inactive (`enabled`) status and `weight` configurations of all prompts in the current tree as a named snapshot ("Profile").
 - **Batch Application:** Select a saved profile from the dropdown in the toolbar to immediately restore all items to their saved states.
 - **Storage Schema:** Profiles are persisted in the `profiles` field of the respective YAML file.
 - **Delete Feature:** Unnecessary profiles can be deleted individually from the dropdown.
 
-### 3.3 Global Settings
+### 3.4 Global Settings
 - **UI Scale:** 3-stage adjustment: Small / Medium / Large.
 - **Language:** Switch between Japanese / English.
 - **Save Location (Storage):** Change the YAML file save directory in the "Shortcut & Storage" group.
 - **File List Refresh:** Reload the file structure via the refresh button.
 - **Sidebar Grouping & Scroll:** Settings other than "File Operations" and "Model Mode" are organized into collapsible panels ("Display & Check", "Shortcut & Storage", "Translation Settings"). A vertical scrollbar appears automatically when the content exceeds the sidebar height.
 
-### 3.4 Asynchronous Loading Indicator
+### 3.5 Asynchronous Loading Indicator
 - **Loading Overlay:** Displays a full-screen, pointer-blocking loading overlay (`v-overlay`) during initial YAML loading, file list retrieval, and file operations (creating, duplicating, renaming, and deleting files).
 - **No-Lock on Auto-Save:** Does not display the loading spinner during auto-saving (`savePrompts`) triggered by prompt toggles or weight slider adjustments, preventing user interactions from being locked.
 - **Operation Interlock:** Blocks all mouse and keyboard interactions during loading to prevent data corruption and race conditions caused by double clicks or concurrent updates.

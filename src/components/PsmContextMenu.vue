@@ -7,6 +7,8 @@ import {
   duplicateItem,
   startDeleteConfirm,
   teleportItem,
+  subdivideGroup,
+  canUseAiClassify,
 } from "../store";
 import { PsmItem } from "../types";
 import { useI18n } from "../composables/useI18n";
@@ -29,6 +31,27 @@ const localShow = computed({
   get: () => props.show,
   set: (val) => emit("update:show", val),
 });
+
+/** AI分類が使えるか (OpenAI互換プロバイダ設定時のみ) */
+const aiAvailable = computed(() => canUseAiClassify());
+
+/**
+ * グループ直下のアイテムをサブ分類でグループ化する
+ * @param useAI ルールで未分類だったタグをAIで補完するか
+ */
+const onSubdivide = async (useAI: boolean) => {
+  const item = props.targetItem;
+  if (!item?.is_group) return;
+  emit("update:show", false);
+  try {
+    const created = await subdivideGroup(item, useAI);
+    if (created === 0) {
+      alert(t("subdivideNoResult"));
+    }
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
+  }
+};
 
 /**
  * 「移動先」の候補となる全てのグループ（およびルート）を再帰的に収集する。
@@ -222,6 +245,26 @@ watch(localShow, async (val) => {
         "
       ></v-list-item>
       <v-divider></v-divider>
+
+      <!-- サブ分類でグループ化 (グループのみ) -->
+      <template v-if="targetItem?.is_group">
+        <v-list-item
+          prepend-icon="mdi-file-tree"
+          :title="t('subdivideGroup')"
+          :subtitle="t('subdivideGroupHint')"
+          @click="onSubdivide(false)"
+          data-testid="ctx-subdivide"
+        ></v-list-item>
+        <v-list-item
+          v-if="aiAvailable"
+          prepend-icon="mdi-robot-outline"
+          :title="t('subdivideGroupAi')"
+          :subtitle="t('subdivideGroupAiHint')"
+          @click="onSubdivide(true)"
+          data-testid="ctx-subdivide-ai"
+        ></v-list-item>
+        <v-divider></v-divider>
+      </template>
 
       <!-- 移動 (Move To) -->
       <!-- Activator Item (Placed directly in list) -->
