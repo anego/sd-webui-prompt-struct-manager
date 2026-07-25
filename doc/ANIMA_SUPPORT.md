@@ -1,6 +1,12 @@
 # PSM Anima対応 調査報告・改修方針書
 
-作成日: 2026-07-22 / 対象: sd-webui-prompt-struct-manager (ForgeNeo導入版)
+作成日: 2026-07-22 / 最終更新: 2026-07-25 / 対象: sd-webui-prompt-struct-manager
+
+> **本ドキュメントの位置づけ**
+> Anima対応の調査記録と設計書です。Phase 1〜5の実装はすべて完了し、v1.3.0としてリリースされました。
+> 利用者向けの機能説明は [FEATURES.md](FEATURES.md)、変更点の一覧は [CHANGELOG.md](../CHANGELOG.md) を参照してください。
+> Anima対応から派生したUX改修（サブ分類の任意実行、AI分類、移動先クイック選択、DnDのSortableJS統一とクローン方式化）も
+> 同時期に実施しており、詳細はCHANGELOGに記載しています。
 
 ## 1. 背景: Animaのプロンプト仕様(PSMに関係する部分のみ)
 

@@ -42,23 +42,46 @@ Unified Logger module.
 - `Logger.debug()`: Output only if `state.isDevMode` is `true`.
 - Automatically adds `[PSM]` prefix.
 
+### `src/dragOptions.ts`
+Centralized drag & drop (SortableJS / vuedraggable) options.
+- **`forceFallback: true`**: PSM is mounted inside the `gradio-app` shadowRoot, where HTML5 native DnD event propagation is unreliable. Everything is unified on SortableJS's mouse-driven fallback mode (do **not** add native `dragover` / `drop` handlers).
+- **`pull: "clone"`**: Keeps the item in its source list while dragging to another list. Otherwise the source collapses, shifting the layout so the drop target escapes the cursor. Removal from the source is performed by `finalizeCrossListMove()` after the drop is committed.
+- Drop-accuracy settings (`fallbackOnBody` / `emptyInsertThreshold` / `swapThreshold` / `invertSwap` / `scroll`) are also managed here.
+
+### `scripts/psm/translate.py`
+Translation backend with provider abstraction.
+- `PROVIDERS` registers `openai` (OpenAI-compatible API) and `deepl`. To add a provider, implement `_translate_<name>()` and register it.
+- Stateless by design: translation settings are sent from the frontend (localStorage) with each request.
+- `sanitize_response()` strips Qwen-style `<think>` blocks, prefixes, and surrounding quotes.
+
+### `scripts/psm/tagdb.py`
+Tag DB lookup and subcategory classification.
+- Auto-discovers `extensions/*/tags/danbooru*.csv` (tagcomplete) with lazy loading and an in-process cache (measured: ~170k entries in 0.14s).
+- `lookup()` maps Danbooru tag types to PSM categories; `subcategory()` applies keyword rules for the 13 subcategories.
+- `SUBCATEGORY_RULES` is **evaluated in order**, so put more specific rules first (e.g. `hair ornament` before `hair`). Keys must stay in sync with `SUBCAT_LABELS` / `SUBCAT_ORDER` in `store.ts`.
+
 ## 4. Automated Testing
 
 To ensure quality and reliability, this project utilizes a 3-layered automated test suite consisting of frontend unit tests (Vitest), backend unit tests (pytest), and end-to-end browser tests (Playwright).
 
 ### 4.1 Frontend Unit Tests (Vitest)
-Tests frontend store logic (`store.ts`), state management, duplicate detection, exclusive selection, and profile snapshots.
+Tests frontend store logic (`store.ts`): state management, duplicate detection, exclusive selection, profile snapshots,
+prompt compilation (underscore protection / category ordering), translation, diffing, token estimation,
+PNG Info import, quick move-to, and drag & drop move finalization.
 - **Test file:** `tests/store_prompt.spec.ts`
-- **Total Tests:** 22 passed
+- **Total Tests:** ~112
 - **Command:**
   ```bash
   npm run test:unit
   ```
 
 ### 4.2 Backend Unit Tests (pytest)
-Tests Python API endpoints, configuration file I/O, and YAML storage schemas.
-- **Test file:** `tests/test_psm_extension.py`
-- **Total Tests:** 16 passed
+Tests Python API endpoints, configuration file I/O, YAML storage schemas, translation providers, and tag DB classification.
+- **Test files:**
+  - `tests/test_psm_extension.py` — API, config, YAML persistence
+  - `tests/test_psm_translate.py` — translation providers, response sanitization, error mapping
+  - `tests/test_psm_tagdb.py` — tag DB loading, category mapping, subcategory rules
+- **Total Tests:** ~74 (more after `parametrize` expansion)
 - **Command:**
   ```bash
   pytest

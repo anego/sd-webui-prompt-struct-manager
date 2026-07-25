@@ -29,18 +29,31 @@ This extension has a hybrid structure consisting of a backend (Python/Gradio) an
 ## 3. File Structure
 ```
 extensions/sd-webui-prompt-struct-manager/
-├── doc/                # Documentation
+├── doc/                # Documentation (OVERVIEW / FEATURES / DATA_STRUCTURE / DEVELOPMENT / ANIMA_SUPPORT)
 ├── javascript/         # WebUI entry point (psm_panel.js)
-├── scripts/            # Build scripts (embed_font.js)
+├── scripts/            # Python extension + build scripts
+│   ├── psm_extension.py    # WebUI callback registration
+│   ├── psm/
+│   │   ├── api.py          # FastAPI endpoints
+│   │   ├── config.py       # config.json read/write
+│   │   ├── storage.py      # YAML persistence and file operations
+│   │   ├── translate.py    # Translation provider abstraction (OpenAI-compatible / DeepL)
+│   │   └── tagdb.py        # Tag DB lookup, category and subcategory detection
+│   └── embed_font.js       # Base64 embedding of the MDI font
 ├── src/                # Vue.js Frontend Source Code
-│   ├── components/     # UI Components (GroupMap, TreePane, etc.)
-│   ├── composables/    # Shared Logic (useKeyboardNav, etc.)
+│   ├── components/     # UI Components (TreePane, Node, dialogs, etc.)
+│   ├── composables/    # Shared Logic (useI18n, useKeyboardNav)
+│   ├── i18n/           # Japanese / English message definitions
+│   ├── styles/         # SCSS (variables and global styles)
 │   ├── App.vue         # Main Component
 │   ├── main.ts         # Entry Point
-│   ├── store.ts        # State Management
+│   ├── store.ts        # State management and business logic
+│   ├── dragOptions.ts  # Shared drag & drop (SortableJS) options
 │   ├── log.ts          # Logger
 │   └── types.ts        # Type Definitions
+├── tests/              # Automated tests (Vitest / pytest / Playwright)
 ├── dist/               # Build Artifacts (index.js)
+├── CHANGELOG.md        # Changelog
 ├── vite.config.ts      # Vite Config
 └── package.json        # Dependencies
 ```
