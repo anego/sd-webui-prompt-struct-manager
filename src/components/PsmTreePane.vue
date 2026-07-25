@@ -8,7 +8,18 @@ import { computed, ref, provide } from "vue";
 import draggable from "vuedraggable";
 import PsmNode from "./PsmNode.vue";
 import { PsmItem } from "../types";
-import { addItem, savePrompts, state } from "../store";
+import {
+  addItem,
+  savePrompts,
+  state,
+  estimateTokenCount,
+  getCompiledPrompts,
+  CLIP_CHUNK_SIZE,
+  beginDrag,
+  endDrag,
+  finalizeCrossListMove,
+} from "../store";
+import { DRAG_OPTIONS } from "../dragOptions";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -58,6 +69,14 @@ const scaleClass = computed(() => {
   }
 });
 
+/**
+ * このペインのトークン数概算 (ツリー変更に追従してライブ更新)
+ * animaモードではCLIPのチャンク概念がないため、チャンク表示は行わない
+ */
+const tokenEstimate = computed(() =>
+  estimateTokenCount(getCompiledPrompts(props.items, ", ", true))
+);
+
 const toggleOpen = () => emit("update:isOpen", !props.isOpen);
 const closePane = () => emit("update:isOpen", false);
 const openPane = () => emit("update:isOpen", true);
@@ -95,6 +114,17 @@ const openPane = () => emit("update:isOpen", true);
         ></v-text-field>
 
         <v-spacer></v-spacer>
+
+        <!-- トークン数の概算 (ライブ更新) -->
+        <span
+          class="text-caption mr-2 flex-shrink-0 psm-pane__token-count"
+          :class="(state.modelMode !== 'anima' && tokenEstimate.chunks > 1) ? 'text-warning' : 'text-grey'"
+          :title="t('tokenHint')"
+          data-testid="token-count"
+        >
+          ≈{{ tokenEstimate.tokens }}<template v-if="state.modelMode !== 'anima'">/{{ tokenEstimate.chunks * CLIP_CHUNK_SIZE }}</template>
+        </span>
+
         <div class="d-flex ga-1">
           <v-btn
             size="x-small"
@@ -113,14 +143,11 @@ const openPane = () => emit("update:isOpen", true);
         <draggable
           v-model="writableItems"
           item-key="id"
-          group="psm-tree"
-          handle=".psm-node__drag-handle"
-          :animation="150"
-          :force-fallback="true"
-          :fallback-tolerance="3"
+          v-bind="DRAG_OPTIONS"
           class="d-flex flex-wrap align-center ga-1"
-          @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = writableItems[e.oldIndex!]; }"
-          @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
+          @start="(e: { oldIndex?: number }) => beginDrag(writableItems, e.oldIndex)"
+          @end="() => { endDrag(); savePrompts(); }"
+          @add="() => { finalizeCrossListMove(writableItems); savePrompts(); }"
         >
           <template #item="{ element }">
             <PsmNode :item="element" :parentChildren="writableItems" />

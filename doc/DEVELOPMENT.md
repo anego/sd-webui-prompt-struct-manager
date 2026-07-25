@@ -42,23 +42,46 @@ MDIアイコン (`@mdi/font`) の表示崩れを防ぐための重要スクリ�
 - `Logger.debug()`: `state.isDevMode` が `true` の場合のみ出力。
 - `[PSM]` プレフィックスを自動付与。
 
+### `src/dragOptions.ts`
+ドラッグ&ドロップ (SortableJS / vuedraggable) の共通オプションを集約したモジュール。
+- **`forceFallback: true`**: PSMは `gradio-app` のshadowRoot内にマウントされるため、HTML5ネイティブDnDではイベント伝播が不安定になる。SortableJSのマウス駆動モードに統一している（ネイティブの `dragover` / `drop` ハンドラは使用しないこと）。
+- **`pull: "clone"`**: 他リストへのドラッグ中に移動元から要素が抜けないようにする。抜けるとレイアウトが詰まり、ドロップ先がカーソルから逃げるため。移動元からの削除は `finalizeCrossListMove()` がドロップ確定後に行う。
+- ドロップ精度に関わる設定（`fallbackOnBody` / `emptyInsertThreshold` / `swapThreshold` / `invertSwap` / `scroll`）もここで一元管理する。
+
+### `scripts/psm/translate.py`
+翻訳バックエンドのプロバイダ抽象化モジュール。
+- `PROVIDERS` に `openai`（OpenAI互換API）と `deepl` を登録。新規プロバイダは `_translate_<name>()` を実装して登録するだけで追加できる。
+- ステートレス設計。翻訳設定はリクエストごとにフロントエンド（localStorage）から渡される。
+- `sanitize_response()` がQwen系の `<think>` ブロックや前置き・引用符を除去する。
+
+### `scripts/psm/tagdb.py`
+タグDB参照とサブ分類の判定モジュール。
+- `extensions/*/tags/danbooru*.csv`（tagcomplete）を自動探索し、遅延ロード＋プロセス内キャッシュで保持する（実測: 約17万エントリを0.14秒）。
+- `lookup()` がDanbooruのタグ種別をPSMカテゴリへ変換し、`subcategory()` がキーワードルールで13分類へ振り分ける。
+- `SUBCATEGORY_RULES` は**上から順に評価される**ため、より限定的なルールを先に置くこと（例: `hair ornament` を `hair` より前に）。フロントエンドの `SUBCAT_LABELS` / `SUBCAT_ORDER`（`store.ts`）とキーを一致させる必要がある。
+
 ## 4. 自動テスト
 
 本プロジェクトでは、堅牢性と品質向上のため、フロントエンド単体テスト（Vitest）、バックエンド単体テスト（pytest）、実機ブラウザ（Playwright）の3層に分かれた階層的な自動テストスイートを導入しています。
 
 ### 4.1 フロントエンド単体テスト (Vitest)
-フロントエンドのストアロジック (`store.ts`) や、重複チェック、排他選択、プロファイル復元などの状態制御をテストします。
-- **テストファイル:** `tests/store_prompt.spec.ts` など
-- **テスト件数:** 22件
+フロントエンドのストアロジック (`store.ts`) をテストします。重複チェック・排他選択・プロファイル復元に加え、
+プロンプトのコンパイル（アンダースコア保護／カテゴリ整列）、翻訳、差分計算、トークン数概算、PNG Info取込、
+移動先クイック選択、ドラッグ&ドロップの移動確定などを対象とします。
+- **テストファイル:** `tests/store_prompt.spec.ts`
+- **テスト件数:** 約112件
 - **実行コマンド:**
   ```bash
   npm run test:unit
   ```
 
 ### 4.2 バックエンド単体テスト (pytest)
-Python APIエンドポイントや設定のI/O管理、YAMLの保存・読み込み仕様などをテストします。
-- **テストファイル:** `tests/test_psm_extension.py` など
-- **テスト件数:** 16件
+Python APIエンドポイント、設定のI/O管理、YAMLの保存・読み込み仕様、翻訳プロバイダ、タグDBの判定をテストします。
+- **テストファイル:**
+  - `tests/test_psm_extension.py` — API・設定・YAML永続化
+  - `tests/test_psm_translate.py` — 翻訳プロバイダ、応答サニタイズ、エラーマッピング
+  - `tests/test_psm_tagdb.py` — タグDBのロード、カテゴリ変換、サブ分類判定
+- **テスト件数:** 約74件（`parametrize` 展開後はさらに増加）
 - **実行コマンド:**
   ```bash
   pytest

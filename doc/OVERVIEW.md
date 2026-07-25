@@ -29,18 +29,31 @@
 ## 3. ファイル構造
 ```
 extensions/sd-webui-prompt-struct-manager/
-├── doc/                # 仕様ドキュメント
+├── doc/                # 仕様ドキュメント (OVERVIEW / FEATURES / DATA_STRUCTURE / DEVELOPMENT / ANIMA_SUPPORT)
 ├── javascript/         # WebUI読み込み用エントリポイント (psm_panel.js)
-├── scripts/            # ビルド用スクリプト (embed_font.js)
+├── scripts/            # Python拡張本体 + ビルド用スクリプト
+│   ├── psm_extension.py    # WebUIへのコールバック登録
+│   ├── psm/
+│   │   ├── api.py          # FastAPIエンドポイント群
+│   │   ├── config.py       # 設定ファイル (config.json) の読み書き
+│   │   ├── storage.py      # YAMLの保存・読込・ファイル操作
+│   │   ├── translate.py    # 翻訳プロバイダ抽象化 (OpenAI互換 / DeepL)
+│   │   └── tagdb.py        # タグDB参照とカテゴリ・サブ分類の判定
+│   └── embed_font.js       # MDIフォントのBase64埋め込み
 ├── src/                # Vue.js フロントエンドソースコード
-│   ├── components/     # UIコンポーネント (GroupMap, TreePaneなど)
-│   ├── composables/    # 共通ロジック (useKeyboardNavなど)
+│   ├── components/     # UIコンポーネント (TreePane, Node, 各ダイアログなど)
+│   ├── composables/    # 共通ロジック (useI18n, useKeyboardNav)
+│   ├── i18n/           # 日本語・英語のメッセージ定義
+│   ├── styles/         # SCSS (変数定義とグローバルスタイル)
 │   ├── App.vue         # メインコンポーネント
 │   ├── main.ts         # エントリポイント
-│   ├── store.ts        # 状態管理
+│   ├── store.ts        # 状態管理・ビジネスロジック
+│   ├── dragOptions.ts  # ドラッグ&ドロップ (SortableJS) の共通オプション
 │   ├── log.ts          # ログ管理
 │   └── types.ts        # 型定義
+├── tests/              # 自動テスト (Vitest / pytest / Playwright)
 ├── dist/               # ビルド成果物 (index.js)
+├── CHANGELOG.md        # 変更履歴
 ├── vite.config.ts      # Vite設定
 └── package.json        # 依存関係定義
 ```

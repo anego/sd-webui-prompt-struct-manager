@@ -4,11 +4,101 @@
  * グループおよびプロンプトの新規作成・編集を行います。
  */
 import { computed, ref, watch, nextTick, onUnmounted } from "vue";
-import { state, finishEdit, cancelEdit, startDeleteConfirm } from "../store";
+import { state, finishEdit, cancelEdit, startDeleteConfirm, translateText, suggestCategoryForGroup } from "../store";
 import PsmModal from "./PsmModal.vue";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
+
+/** 翻訳エラーメッセージ (インライン表示用) */
+const translateError = ref("");
+
+/**
+ * グループヘッダ背景色のプリセット (ダークテーマに馴染む低明度8色)
+ */
+const HEADER_COLOR_PRESETS = [
+  "#7f1d1d", // 赤
+  "#78350f", // 琥珀
+  "#14532d", // 緑
+  "#134e4a", // ティール
+  "#1e3a8a", // 青
+  "#312e81", // 藍
+  "#581c87", // 紫
+  "#831843", // ピンク
+];
+
+/** カスタム色入力 (input type="color") のハンドラ */
+const onCustomColor = (e: Event) => {
+  const v = (e.target as HTMLInputElement).value;
+  if (state.editingItem) state.editingItem.headerColor = v;
+};
+
+// ---- カテゴリ自動判定 (Phase 5B) ----
+
+const isAutoCat = ref(false);
+const autoCatHint = ref("");
+
+/** カテゴリ値 → 短縮表示名のi18nキー */
+const CAT_SHORT_KEY: Record<string, string> = {
+  quality: "catShortQuality",
+  subject: "catShortSubject",
+  character: "catShortCharacter",
+  series: "catShortSeries",
+  artist: "catShortArtist",
+  general: "catShortGeneral",
+};
+
+/**
+ * グループ配下のタグをタグDBで判定し、多数決でカテゴリを提案する
+ * (完了ボタンを押すまで保存はされない)
+ */
+const onAutoDetectCategory = async () => {
+  const item = state.editingItem;
+  if (!item || !item.is_group || isAutoCat.value) return;
+  isAutoCat.value = true;
+  autoCatHint.value = "";
+  try {
+    const s = await suggestCategoryForGroup(item);
+    if (!s.total) {
+      autoCatHint.value = t("autoCatEmpty");
+      return;
+    }
+    if (s.suggested) {
+      item.category = s.suggested;
+    }
+    const parts = Object.entries(s.counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, n]) => `${t(CAT_SHORT_KEY[c] || "catShortGeneral")}${n}`);
+    if (s.unknown > 0) {
+      parts.push(`${t("autoCatUnknown")}${s.unknown}`);
+    }
+    autoCatHint.value = t("autoCatBreakdown", { total: String(s.total), parts: parts.join(" / ") });
+  } catch (e) {
+    autoCatHint.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    isAutoCat.value = false;
+  }
+};
+
+/**
+ * 原文 (sourceText) を英訳し、結果を content へ反映する
+ * 既存の content がある場合は上書き確認を行う
+ */
+const onTranslate = async () => {
+  const item = state.editingItem;
+  if (!item || !item.sourceText?.trim() || state.isTranslating) return;
+
+  if (item.content?.trim()) {
+    if (!confirm(t("translateOverwriteConfirm"))) return;
+  }
+
+  translateError.value = "";
+  try {
+    item.content = await translateText(item.sourceText);
+  } catch (e) {
+    translateError.value = e instanceof Error ? e.message : String(e);
+  }
+};
 
 const nameInputRef = ref<{ focus: () => void } | null>(null);
 const contentInputRef = ref<{ focus: () => void; $el: HTMLElement } | null>(null);
@@ -220,6 +310,10 @@ watch(
   () => state.isEditing,
   async (val) => {
     if (val) {
+      // 前回のインライン表示をリセット
+      autoCatHint.value = "";
+      translateError.value = "";
+
       // モーダルが開く前に大辞典の存在を事前検知し、モーダルの初期幅を決定する
       state.hasDictionary = checkDictionaryPresence();
 
@@ -338,6 +432,119 @@ const modalTitle = computed(() => {
               hide-details
               class="mb-1"
             ></v-switch>
+
+            <!-- Category Selector for Groups (Phase 3: animaモード時の出力整列に使用)
+                 zIndexはPsmModalの $z-index-modal (2000000000) より上にする必要がある -->
+            <v-select
+              v-if="state.editingItem.is_group"
+              :model-value="state.editingItem.category || 'general'"
+              :items="[
+                { title: t('catQuality'), value: 'quality' },
+                { title: t('catSubject'), value: 'subject' },
+                { title: t('catCharacter'), value: 'character' },
+                { title: t('catSeries'), value: 'series' },
+                { title: t('catArtist'), value: 'artist' },
+                { title: t('catGeneral'), value: 'general' },
+              ]"
+              :label="t('categoryLabel')"
+              :hint="t('categoryHint')"
+              persistent-hint
+              density="compact"
+              variant="outlined"
+              :menu-props="{ zIndex: 2000000010 }"
+              class="mb-1"
+              data-testid="edit-category-select"
+              @update:model-value="(v) => state.editingItem!.category = v"
+            ></v-select>
+
+            <!-- Auto Category Detection (Phase 5B) -->
+            <div v-if="state.editingItem.is_group" class="d-flex align-center ga-2 mb-2 flex-wrap">
+              <v-btn
+                size="small"
+                variant="tonal"
+                color="teal"
+                prepend-icon="mdi-auto-fix"
+                :loading="isAutoCat"
+                @click="onAutoDetectCategory"
+                data-testid="auto-category-btn"
+              >{{ t('autoCatBtn') }}</v-btn>
+              <span v-if="autoCatHint" class="text-caption text-grey">{{ autoCatHint }}</span>
+            </div>
+
+            <!-- Header Color Picker for Groups -->
+            <div v-if="state.editingItem.is_group" class="mb-2">
+              <div class="text-caption text-grey mb-1">{{ t('headerColorLabel') }}</div>
+              <div class="d-flex align-center ga-2 flex-wrap">
+                <button
+                  v-for="c in HEADER_COLOR_PRESETS"
+                  :key="c"
+                  type="button"
+                  class="psm-color-swatch"
+                  :class="{ 'psm-color-swatch--selected': state.editingItem.headerColor === c }"
+                  :style="{ backgroundColor: c }"
+                  :title="c"
+                  @click="state.editingItem!.headerColor = c"
+                ></button>
+                <label class="psm-color-swatch psm-color-swatch--custom" :title="t('headerColorCustom')">
+                  <v-icon size="14">mdi-palette</v-icon>
+                  <input
+                    type="color"
+                    :value="state.editingItem.headerColor || '#37474f'"
+                    @input="onCustomColor"
+                  />
+                </label>
+                <v-btn
+                  size="x-small"
+                  variant="text"
+                  prepend-icon="mdi-water-off"
+                  :disabled="!state.editingItem.headerColor"
+                  @click="state.editingItem!.headerColor = undefined"
+                >{{ t('headerColorClear') }}</v-btn>
+              </div>
+            </div>
+
+            <!-- Natural Language Switch for Prompts -->
+            <v-switch
+              v-if="!state.editingItem.is_group"
+              v-model="state.editingItem.isNatural"
+              color="teal-accent-3"
+              :label="state.editingItem.isNatural ? t('naturalModeOn') : t('naturalModeOff')"
+              density="compact"
+              inset
+              hide-details
+              class="mb-1"
+              data-testid="natural-mode-switch"
+            ></v-switch>
+
+            <!-- Translation Source (Natural Language items only) -->
+            <template v-if="!state.editingItem.is_group && state.editingItem.isNatural">
+              <v-textarea
+                :label="t('translateSource')"
+                v-model="state.editingItem.sourceText"
+                variant="outlined"
+                auto-grow
+                rows="2"
+                max-rows="6"
+                hide-details
+                data-testid="edit-source-input"
+                class="mb-1"
+              ></v-textarea>
+              <div class="d-flex align-center mb-1">
+                <v-btn
+                  size="small"
+                  color="teal"
+                  variant="tonal"
+                  prepend-icon="mdi-translate"
+                  :loading="state.isTranslating"
+                  :disabled="!state.editingItem.sourceText?.trim()"
+                  @click="onTranslate"
+                  data-testid="translate-btn"
+                >
+                  {{ t('translateBtn') }}
+                </v-btn>
+                <span v-if="translateError" class="text-error text-caption ml-2">{{ translateError }}</span>
+              </div>
+            </template>
 
             <v-textarea
               v-if="!state.editingItem.is_group"
@@ -473,6 +680,41 @@ const modalTitle = computed(() => {
   &__textarea--lifted {
     position: relative;
     z-index: $z-index-base;
+  }
+}
+
+/* グループヘッダ背景色のスウォッチ */
+.psm-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s, border-color 0.15s;
+
+  &:hover {
+    transform: scale(1.15);
+  }
+
+  &--selected {
+    border: 2px solid #fff;
+    transform: scale(1.1);
+  }
+
+  &--custom {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #e66465, #9198e5);
+    position: relative;
+
+    input[type="color"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
   }
 }
 

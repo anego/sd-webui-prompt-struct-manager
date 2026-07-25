@@ -21,40 +21,44 @@ def get_prompts_data(file_name: str) -> Dict[str, List[Dict[str, object]]]:
     """
     指定された YAML ファイルからプロンプトデータ（positive/negative/profiles）をロードします。
     """
-    empty_structure: Dict[str, List[Dict[str, object]]] = {"positive": [], "negative": [], "profiles": []}
+    empty_structure: Dict[str, object] = {"positive": [], "negative": [], "profiles": [], "model_mode": "sd"}
     if not file_name:
         return empty_structure
 
     try:
         target_dir: Path = config.get_psm_dir()
         path: Path = (target_dir / file_name).resolve()
-        
+
         if not path.exists() or not path.is_file():
             print(f"[PSM] File not found in get_prompts_data: {path}")
             return empty_structure
-            
+
         with path.open('r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
-            
+
         if not isinstance(data, dict):
             return empty_structure
-            
+
         pos = data.get("positive")
         neg = data.get("negative")
         profiles = data.get("profiles")
-        
+        model_mode = data.get("model_mode")
+
         return {
             "positive": pos if isinstance(pos, list) else [],
             "negative": neg if isinstance(neg, list) else [],
-            "profiles": profiles if isinstance(profiles, list) else []
+            "profiles": profiles if isinstance(profiles, list) else [],
+            # 未定義・不正値は "sd" にフォールバック (後方互換)
+            "model_mode": model_mode if model_mode in ("sd", "anima") else "sd"
         }
     except Exception as e:
         print(f"[PSM ERROR] get_prompts_data failed for {file_name}: {e}")
         return empty_structure
 
-def save_prompts_data(file_name: str, positive_list: List[object], negative_list: List[object], profiles_list: Optional[List[object]] = None) -> Dict[str, str]:
+def save_prompts_data(file_name: str, positive_list: List[object], negative_list: List[object], profiles_list: Optional[List[object]] = None, model_mode: Optional[str] = None) -> Dict[str, str]:
     """
-    プロンプトデータ（positive/negative/profiles）を YAML 形式で保存します。
+    プロンプトデータ（positive/negative/profiles/model_mode）を YAML 形式で保存します。
+    将来バージョンで追加された未知のルートキーは既存ファイルから引き継いで保持します。
     """
     if not file_name:
         return {"status": "error", "message": "Invalid file name"}
@@ -62,17 +66,34 @@ def save_prompts_data(file_name: str, positive_list: List[object], negative_list
     try:
         target_dir: Path = config.get_psm_dir()
         path: Path = (target_dir / file_name).resolve()
-        
+
         # ディレクトリの安全な作成
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
+        # 既存ファイルの未知キーを保持する (旧バージョンとの相互運用性のため)
+        existing: Dict[str, object] = {}
+        if path.exists() and path.is_file():
+            try:
+                with path.open('r', encoding='utf-8') as f:
+                    loaded = yaml.safe_load(f)
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except Exception:
+                pass  # 壊れたファイルは新規データで上書き
+
+        existing.update({
+            "positive": positive_list,
+            "negative": negative_list,
+            "profiles": profiles_list if profiles_list is not None else [],
+        })
+        if model_mode in ("sd", "anima"):
+            existing["model_mode"] = model_mode
+        elif "model_mode" not in existing:
+            existing["model_mode"] = "sd"
+
         with path.open('w', encoding='utf-8') as f:
-            yaml.dump({
-                "positive": positive_list, 
-                "negative": negative_list,
-                "profiles": profiles_list if profiles_list is not None else []
-            }, f, allow_unicode=True, sort_keys=False)
-            
+            yaml.dump(existing, f, allow_unicode=True, sort_keys=False)
+
         return {"status": "success"}
     except Exception as e:
         print(f"[PSM ERROR] save_prompts_data failed for {file_name}: {e}")

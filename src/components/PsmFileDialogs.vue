@@ -34,15 +34,19 @@ const emit = defineEmits<{
 
 const names = ref({ new: "", copy: "", rename: "", import: "" });
 
+/** 新規作成時にAnimaテンプレートで初期化するか (Phase 3) */
+const withAnimaTemplate = ref(false);
+
 /**
  * 新規ファイル作成実行
  */
 const handleCreateFile = async () => {
   const n = names.value.new.trim();
   if (!n) return;
-  await createYamlFile(n);
+  await createYamlFile(n, withAnimaTemplate.value);
   emit("update:newDialog", false);
   names.value.new = "";
+  withAnimaTemplate.value = false;
 };
 
 /**
@@ -99,6 +103,16 @@ const executeImport = async (mode: "overwrite" | "new") => {
             v-model="names.new"
             @keyup.enter="handleCreateFile"
           ></v-text-field>
+          <v-switch
+            v-model="withAnimaTemplate"
+            color="teal"
+            density="compact"
+            inset
+            :label="t('animaTemplateOption')"
+            :hint="t('animaTemplateHint')"
+            persistent-hint
+            data-testid="anima-template-switch"
+          ></v-switch>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>

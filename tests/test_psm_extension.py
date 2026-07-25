@@ -435,3 +435,97 @@ def test_save_and_get_prompts_with_profiles(test_client: TestClient, temp_extens
     assert retrieved_data["positive"] == prompt_payload["positive"]
     assert retrieved_data["negative"] == prompt_payload["negative"]
     assert retrieved_data["profiles"] == prompt_payload["profiles"]
+
+def test_save_and_get_prompts_with_model_mode(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    model_mode ("anima") を含むプロンプトデータの保存と取得が正しく行えることを検証します。
+    """
+    # Arrange
+    prompt_payload: Dict[str, object] = {
+        "file": "test_anima.yaml",
+        "positive": [{"id": 1, "text": "score_7"}],
+        "negative": [],
+        "model_mode": "anima"
+    }
+
+    # Act: 保存の実行
+    save_response = test_client.post("/psm/save-prompts", json=prompt_payload)
+
+    # Assert: 保存成功の確認
+    assert save_response.status_code == 200
+    assert save_response.json() == {"status": "success"}
+
+    # Act: 取得の実行
+    get_response = test_client.get("/psm/get-prompts?file=test_anima.yaml")
+
+    # Assert: model_mode が保持されていること
+    assert get_response.status_code == 200
+    assert get_response.json()["model_mode"] == "anima"
+
+def test_get_prompts_model_mode_fallback(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    model_mode キーを持たない旧形式の YAML ファイルをロードした場合に
+    "sd" にフォールバックすること（後方互換性）を検証します。
+    """
+    # Arrange: model_mode なしの旧形式ファイルを直接作成
+    target_dir: Path = config.get_psm_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file: Path = target_dir / "legacy.yaml"
+    with legacy_file.open("w", encoding="utf-8") as f:
+        yaml.dump({"positive": [], "negative": []}, f)
+
+    # Act
+    get_response = test_client.get("/psm/get-prompts?file=legacy.yaml")
+
+    # Assert
+    assert get_response.status_code == 200
+    assert get_response.json()["model_mode"] == "sd"
+
+def test_save_prompts_invalid_model_mode_ignored(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    不正な model_mode 値が送信された場合は無視され、"sd" として保存されることを検証します。
+    """
+    # Arrange
+    prompt_payload: Dict[str, object] = {
+        "file": "test_invalid_mode.yaml",
+        "positive": [],
+        "negative": [],
+        "model_mode": "flux9999"  # 不正な値
+    }
+
+    # Act
+    save_response = test_client.post("/psm/save-prompts", json=prompt_payload)
+    assert save_response.status_code == 200
+
+    get_response = test_client.get("/psm/get-prompts?file=test_invalid_mode.yaml")
+
+    # Assert: 不正値は "sd" へフォールバック
+    assert get_response.json()["model_mode"] == "sd"
+
+def test_save_prompts_preserves_unknown_keys(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    将来バージョンで追加された未知のルートキーが、保存時に消えずに保持されることを検証します。
+    """
+    # Arrange: 未知キー付きのファイルを直接作成
+    target_dir: Path = config.get_psm_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    future_file: Path = target_dir / "future.yaml"
+    with future_file.open("w", encoding="utf-8") as f:
+        yaml.dump({
+            "positive": [], "negative": [],
+            "future_feature_key": {"some": "data"}
+        }, f)
+
+    # Act: 通常の保存を実行（未知キーは送信されない）
+    save_response = test_client.post("/psm/save-prompts", json={
+        "file": "future.yaml",
+        "positive": [{"id": 1, "text": "1girl"}],
+        "negative": []
+    })
+    assert save_response.status_code == 200
+
+    # Assert: ファイル内に未知キーが残っていること
+    with future_file.open("r", encoding="utf-8") as f:
+        saved = yaml.safe_load(f)
+    assert saved["future_feature_key"] == {"some": "data"}
+    assert saved["positive"] == [{"id": 1, "text": "1girl"}]

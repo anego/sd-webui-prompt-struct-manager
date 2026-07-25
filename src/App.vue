@@ -33,6 +33,9 @@ import PsmGroupMap from "./components/PsmGroupMap.vue";
 import PsmGenerateConfirmDialog from "./components/PsmGenerateConfirmDialog.vue";
 import PsmDuplicateConfirmDialog from "./components/PsmDuplicateConfirmDialog.vue";
 import PsmSetupWizard from "./components/PsmSetupWizard.vue";
+import PsmPreviewModal from "./components/PsmPreviewModal.vue";
+import PsmInfotextDialog from "./components/PsmInfotextDialog.vue";
+import PsmMoveDialog from "./components/PsmMoveDialog.vue";
 import { useI18n } from "./composables/useI18n";
 
 const { t } = useI18n();
@@ -53,6 +56,8 @@ const dialogs = ref({
   generate: false,
   profileNew: false,
   profileDelete: false,
+  preview: false,
+  infotext: false,
 });
 const newProfileNameInput = ref("");
 
@@ -125,8 +130,9 @@ provide("psm-context-menu", openContextMenu);
  * 生成ボタンは押さない。
  */
 const handleApply = () => {
-  const posStr = getCompiledPrompts(state.positive);
-  const negStr = getCompiledPrompts(state.negative);
+  // 第3引数: animaモード時のみルート直下をカテゴリ優先度で整列して出力 (Phase 3)
+  const posStr = getCompiledPrompts(state.positive, ", ", true);
+  const negStr = getCompiledPrompts(state.negative, ", ", true);
   const root = getWebUiRoot();
   const img2imgGen = root.getElementById("img2img_generate");
   const prefix = img2imgGen && img2imgGen.offsetParent !== null ? "img2img" : "txt2img";
@@ -567,7 +573,29 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
             >
               <v-icon>mdi-import</v-icon>
             </v-btn>
+            <v-btn
+              variant="outlined"
+              size="small"
+              class="ml-1"
+              @click.stop="dialogs.infotext = true"
+              :title="t('infotextTitle')"
+              data-testid="open-infotext-btn"
+            >
+              <v-icon start size="small">mdi-image-text</v-icon>
+              {{ t('infotextBtn') }}
+            </v-btn>
           </div>
+          <v-btn
+            variant="outlined"
+            size="small"
+            class="ml-2"
+            @click.stop="dialogs.preview = true"
+            :title="t('previewTitle')"
+            data-testid="open-preview-btn"
+          >
+            <v-icon start size="small">mdi-eye-outline</v-icon>
+            {{ t('previewBtn') }}
+          </v-btn>
           <v-btn
             color="secondary"
             variant="elevated"
@@ -614,6 +642,15 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 
       <PsmEditModal />
       <PsmDeleteDialog />
+
+      <PsmPreviewModal
+        v-model="dialogs.preview"
+        @apply="handleApplyWithCheck"
+      />
+
+      <PsmInfotextDialog v-model="dialogs.infotext" />
+
+      <PsmMoveDialog />
 
       <PsmContextMenu
         v-model:show="contextMenu.show"
@@ -696,15 +733,13 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         @confirm="executeGenerate"
       />
       
-      <!-- 操作不可のローディングオーバーレイ -->
-      <v-overlay
-        v-model="state.isLoading"
-        class="align-center justify-center psm-loading-overlay"
-        persistent
-        scrim="black"
-        :opacity="0.6"
-        z-index="30000000"
-        attach
+      <!-- 操作不可のローディングオーバーレイ
+           モーダルと同じ階層 (#psm_vue_app_overlay) へTeleportしないと、
+           .psm-app-root のスタッキングコンテキストに閉じ込められてモーダルの背後に回るため注意 -->
+      <Teleport to="#psm_vue_app_overlay">
+      <div
+        v-if="state.isLoading"
+        class="psm-loading-overlay"
         data-testid="loading-overlay"
       >
         <div class="text-center d-flex flex-column align-center ga-3">
@@ -717,8 +752,22 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
           <div class="text-white text-subtitle-1 font-weight-bold" v-if="state.loadingText">
             {{ t(state.loadingText) }}
           </div>
+          <!-- バッチ翻訳など、件数の分かる処理では進捗を併記する -->
+          <div v-if="state.translateProgress.total > 0" class="d-flex flex-column align-center ga-1">
+            <div class="text-white text-caption">
+              {{ state.translateProgress.done }} / {{ state.translateProgress.total }}
+            </div>
+            <v-progress-linear
+              :model-value="(state.translateProgress.done / state.translateProgress.total) * 100"
+              color="teal"
+              height="6"
+              rounded
+              style="width: 220px;"
+            ></v-progress-linear>
+          </div>
         </div>
-      </v-overlay>
+      </div>
+      </Teleport>
     </v-app>
   </div>
 </template>

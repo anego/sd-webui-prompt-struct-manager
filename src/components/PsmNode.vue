@@ -11,12 +11,15 @@ import {
   startEdit,
   addItem,
   toggleGroupEnabled,
-  teleportItem,
   setGroupChildrenEnabled,
   toggleItemEnabled,
   toggleGroupExclusive,
   resetWeight,
+  beginDrag,
+  endDrag,
+  finalizeCrossListMove,
 } from "../store";
+import { DRAG_OPTIONS } from "../dragOptions";
 import { PsmItem } from "../types";
 import { useI18n } from "../composables/useI18n";
 
@@ -126,41 +129,70 @@ const addBefore = (is_group: boolean) => {
   addItem(props.parentChildren, is_group, idx);
 };
 
+// -------------------------------------------------------------------------
+// ドラッグ&ドロップ (SortableJSに統一。ネイティブDnDハンドラは使用しない)
+// -------------------------------------------------------------------------
+
 let hoverTimer: number | null = null;
 
-// ドラッグ中にグループの上にホバーした際、自動で開く処理
-const handleGroupMouseOver = () => {
-  if (state.isDragging && !props.item.isOpen) {
-    if (!hoverTimer) {
-      hoverTimer = window.setTimeout(() => {
-        props.item.isOpen = true;
-        hoverTimer = null;
-      }, 500);
-    }
-  }
+/**
+ * ドラッグ中にグループ名へホバーしたら、少し待って自動展開する
+ * SortableJSのフォールバックモードではネイティブのdragenterが発火しないため、
+ * mouseenter + isDragging で判定する
+ */
+const onHoverWhileDragging = () => {
+  if (!state.isDragging || props.item.isOpen || hoverTimer) return;
+  hoverTimer = window.setTimeout(() => {
+    props.item.isOpen = true;
+    hoverTimer = null;
+  }, 400);
 };
 
-const handleGroupMouseLeave = () => {
+const cancelHoverExpand = () => {
   if (hoverTimer) {
     clearTimeout(hoverTimer);
     hoverTimer = null;
   }
 };
 
+/** ドラッグ開始: 対象アイテムと元のリストを記録する */
+const onDragStart = (list: PsmItem[], e: { oldIndex?: number }) => {
+  beginDrag(list, e.oldIndex);
+};
+
+/** ドラッグ終了: 状態をリセットして保存する */
+const onDragEnd = () => {
+  endDrag();
+  savePrompts();
+};
+
 /**
- * アイテムがグループにドロップされた時の処理
- * グループの中（子要素）に追加し、グループを開く
+ * 別のリストからドロップされた時の処理
+ * クローン方式のため、移動元から元のアイテムを削除して移動を確定する
  */
-const handleDropIntoGroup = async () => {
-  if (state.draggedItem && state.draggedItem.id !== props.item.id) {
-    // 循環ドロップ防止 (親を子にドロップしない)
-    // 簡易的なチェック: ターゲットがドロップアイテムの子孫でないか確認
-    
-    // ターゲットグループの子要素に追加
-    if (!props.item.children) props.item.children = [];
-    await teleportItem(state.draggedItem, props.item.children, "child");
-    props.item.isOpen = true; // ドロップ時にグループを開く
-  }
+const onDragAdd = () => {
+  finalizeCrossListMove(props.item.children!);
+  savePrompts();
+};
+
+/**
+ * ドラッグ移動中: ドロップ先のグループをハイライトする
+ * (SortableJSのonMoveはfalseを返すと移動を禁止できるが、ここでは常に許可する)
+ */
+const onDragMove = () => {
+  state.dropTargetId = props.item.id;
+  return true;
+};
+
+/**
+ * 閉じたグループのドロップゾーンへ入った時の処理
+ * SortableJSが item.children へ追加済みなので、グループを開いて保存するだけでよい
+ */
+const onDropIntoClosedGroup = () => {
+  finalizeCrossListMove(props.item.children!);
+  props.item.isOpen = true;
+  state.dropTargetId = null;
+  savePrompts();
 };
 
 const scaleTextClass = computed(() => {
@@ -221,6 +253,15 @@ const isDynamicPrompt = computed(() => {
   return /^__.+__$/.test(content.trim());
 });
 
+/**
+ * BREAK区切りアイテムかどうか (末尾カンマ・大文字小文字を許容)
+ * 該当する場合は <hr> のような横幅いっぱいの区切り線として表示する
+ */
+const isBreak = computed(() => {
+  if (props.item.is_group) return false;
+  return /^break,?$/i.test((props.item.content || "").trim());
+});
+
 const isDuplicate = computed(() => {
   if (props.item.is_group) return false;
   if (!isEffectiveEnabled.value) return false;
@@ -234,6 +275,30 @@ const chipColor = computed(() => {
     return state.duplicateHighlightLevel === "warn" ? "warning" : "error";
   }
   return isDynamicPrompt.value ? 'cyan-accent-2' : 'primary';
+});
+
+/**
+ * カテゴリバッジの定義 (「一般」と未設定は表示しない)
+ */
+const CATEGORY_BADGE: Record<string, { key: string; color: string }> = {
+  quality: { key: "catShortQuality", color: "amber-darken-2" },
+  subject: { key: "catShortSubject", color: "cyan-darken-2" },
+  character: { key: "catShortCharacter", color: "pink-darken-2" },
+  series: { key: "catShortSeries", color: "indigo-darken-1" },
+  artist: { key: "catShortArtist", color: "purple-darken-2" },
+};
+
+const categoryBadge = computed(() => {
+  if (!props.item.is_group || !props.item.category || props.item.category === "general") {
+    return null;
+  }
+  return CATEGORY_BADGE[props.item.category] || null;
+});
+
+/** ヘッダ背景色 (headerColor設定時のみ適用) */
+const headerStyle = computed(() => {
+  if (!props.item.headerColor) return undefined;
+  return { backgroundColor: props.item.headerColor, borderRadius: "4px" };
 });
 
 const moveSelf = (dir: 'up' | 'down') => {
@@ -263,7 +328,7 @@ const moveSelf = (dir: 'up' | 'down') => {
     v-if="isVisible"
     :id="'node-' + item.id"
     class="psm-node mb-1"
-    :class="item.is_group ? 'w-100' : ''"
+    :class="(item.is_group || isBreak) ? 'w-100' : ''"
   >
     <div
       v-if="item.is_group"
@@ -295,6 +360,7 @@ const moveSelf = (dir: 'up' | 'down') => {
       <div
         class="psm-node__header d-flex align-center justify-start cursor-pointer py-1"
         :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
+        :style="headerStyle"
         @click.stop="handleClickHeader"
         @dblclick.stop="startEdit(item)"
         @contextmenu.prevent.stop="
@@ -339,17 +405,28 @@ const moveSelf = (dir: 'up' | 'down') => {
           {{ item.isOpen ? "mdi-folder-open" : "mdi-folder" }}
         </v-icon>
 
+        <!-- ドラッグ中のホバーで自動展開する (SortableJSはネイティブdragイベントを出さないためmouseenterで判定) -->
         <span
           class="text-subtitle-2 font-weight-bold ml-0 text-truncate text-left"
           :class="{ 'text-grey': !isEffectiveEnabled }"
           data-testid="group-label"
           style="max-width: 40%"
-          @dragenter="handleGroupMouseOver"
-          @dragleave="handleGroupMouseLeave"
-          @dragover.prevent
+          @mouseenter="onHoverWhileDragging"
+          @mouseleave="cancelHoverExpand"
         >
           {{ item.name }}
         </span>
+
+        <!-- Category Badge (「一般」は非表示) -->
+        <v-chip
+          v-if="categoryBadge"
+          size="small"
+          :color="categoryBadge.color"
+          variant="flat"
+          label
+          class="ml-2 flex-shrink-0 psm-node__category-badge"
+          data-testid="group-category-badge"
+        >{{ t(categoryBadge.key) }}</v-chip>
 
         <!-- Inline Random Switch -->
         <v-switch
@@ -415,35 +492,65 @@ const moveSelf = (dir: 'up' | 'down') => {
         </span>
       </div>
       
-      <!-- Explicit Drop Zone for Closed Groups -->
-      <div 
+      <!-- 閉じたグループ用のドロップゾーン
+           SortableJSのリスト (item.children を対象) として実装することで、
+           forceFallbackモードでも確実にドロップを受け付けられる -->
+      <draggable
+        v-show="state.isDragging && !item.isOpen"
+        v-model="item.children"
+        item-key="id"
+        v-bind="DRAG_OPTIONS"
         class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey"
-        :class="{ 'd-none': !(state.isDragging && !item.isOpen) }"
-        @dragenter.stop="handleGroupMouseOver"
-        @dragover.prevent
-        @drop.stop="handleDropIntoGroup"
+        :class="{ 'psm-node__drop-zone--hover': state.dropTargetId === item.id }"
+        @start="onDragStart(item.children!, $event)"
+        @end="onDragEnd"
+        @add="onDropIntoClosedGroup"
       >
-        <v-icon size="small" class="mr-1">mdi-arrow-down-bold-box-outline</v-icon>
-        {{ t('openAndDrop') }}
-      </div>
+        <template #header>
+          <div class="d-flex align-center justify-center w-100 psm-node__drop-zone-label">
+            <v-icon size="small" class="mr-1">mdi-arrow-down-bold-box-outline</v-icon>
+            {{ t('openAndDrop') }}
+          </div>
+        </template>
+        <template #item="{ element }">
+          <!-- ドロップ直後に一時的に描画されるだけの要素 (グループを開くと通常表示へ切り替わる) -->
+          <span class="text-caption">{{ element.name || element.content }}</span>
+        </template>
+      </draggable>
 
       <div
         v-if="item.isOpen"
         class="pl-4 mt-1 border-s border-opacity-25"
         :class="{ 'border-grey': !isEffectiveEnabled }"
       >
+        <!-- ドラッグ中は子コンテナに最小高さを与える。
+             空のグループは通常時ほぼ高さ0のため、そのままではドロップ位置を狙えない -->
         <draggable
           v-model="item.children"
           item-key="id"
-          group="psm-tree"
-          handle=".psm-node__drag-handle"
-          :animation="150"
-          :force-fallback="true"
-          :fallback-tolerance="3"
-          class="d-flex flex-wrap align-center ga-1"
-          @start="(e: { oldIndex?: number }) => { state.isDragging = true; state.draggedItem = item.children![e.oldIndex!]; }"
-          @end="() => { state.isDragging = false; state.draggedItem = null; savePrompts(); }"
+          v-bind="DRAG_OPTIONS"
+          class="d-flex flex-wrap align-center ga-1 psm-node__children"
+          :class="{
+            'psm-node__children--drop-target': state.dropTargetId === item.id,
+            'psm-node__children--dragging': state.isDragging,
+            'psm-node__children--empty': state.isDragging && !item.children?.length,
+          }"
+          @start="onDragStart(item.children!, $event)"
+          @end="onDragEnd"
+          @add="onDragAdd"
+          @move="onDragMove"
         >
+          <!-- 空グループ時の誘導ラベル (SortableJSの判定を妨げないよう pointer-events: none) -->
+          <template #header>
+            <div
+              v-if="state.isDragging && !item.children?.length"
+              class="psm-node__children-hint text-caption text-grey d-flex align-center justify-center w-100"
+            >
+              <v-icon size="small" class="mr-1">mdi-tray-arrow-down</v-icon>
+              {{ t('addTo', { name: item.name }) }}
+            </div>
+          </template>
+
           <template #item="{ element }">
             <PsmNode
               :item="element"
@@ -454,17 +561,6 @@ const moveSelf = (dir: 'up' | 'down') => {
 
           </template>
         </draggable>
-        
-        <!-- Explicit Drop Zone for Open Groups -->
-        <div 
-          class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey mb-1"
-          :class="{ 'd-none': !state.isDragging }"
-          @dragover.prevent
-          @drop.stop="handleDropIntoGroup"
-        >
-          <v-icon size="small" class="mr-1">mdi-arrow-down-bold-box-outline</v-icon>
-          {{ t('addTo', { name: item.name }) }}
-        </div>
 
         <div class="d-flex ga-1 mt-1">
           <v-btn
@@ -485,6 +581,43 @@ const moveSelf = (dir: 'up' | 'down') => {
           >
         </div>
       </div>
+    </div>
+
+    <!-- BREAK Divider (横幅いっぱいの区切り線) -->
+    <div
+      v-else-if="isBreak"
+      class="psm-node__break d-flex align-center w-100"
+      :class="{
+        'psm-node__break--disabled': !isEffectiveEnabled,
+        'psm-node--focused': state.focusedItemId === item.id
+      }"
+      :title="t('doubleClickToEdit')"
+      @click.stop="handleClickLeaf"
+      @dblclick.stop="startEdit(item)"
+      @contextmenu.prevent.stop="openContextMenu?.($event, item, parentChildren)"
+      data-testid="break-divider"
+    >
+      <v-icon
+        size="16"
+        class="psm-cursor-grab psm-node__drag-handle flex-shrink-0 mr-1"
+        color="grey-lighten-1"
+      >mdi-drag-vertical</v-icon>
+
+      <span class="psm-node__break-line"></span>
+
+      <span class="psm-node__break-label flex-shrink-0 px-2">
+        <v-icon size="14" class="mr-1">mdi-format-page-break</v-icon>BREAK
+      </span>
+
+      <span class="psm-node__break-line"></span>
+
+      <v-icon
+        size="16"
+        class="ml-1 flex-shrink-0 psm-node__hover-opacity"
+        @click.stop="startEdit(item)"
+        :title="t('edit')"
+        data-testid="edit-item-btn"
+      >mdi-pencil</v-icon>
     </div>
 
     <div v-else class="d-inline-flex flex-column align-center ga-0 psm-node__leaf-container">
@@ -614,6 +747,13 @@ div.psm-node {
     margin-bottom: $spacing-xs;
   }
 
+  /* カテゴリバッジ: 濃色背景でも読めるよう白抜き+太字で強調 */
+  .psm-node__category-badge {
+    color: #fff !important;
+    font-weight: bold;
+    letter-spacing: 0.02em;
+  }
+
   div.psm-node__group {
     .psm-node__action-buttons {
       opacity: 0;
@@ -630,7 +770,7 @@ div.psm-node {
   }
 
   &__drop-zone {
-    height: $size-drop-zone;
+    min-height: $size-drop-zone;
     background-color: $color-primary-light-1;
     border: 1px dashed $color-primary;
     border-radius: $radius-sm;
@@ -639,6 +779,48 @@ div.psm-node {
     &:hover {
       background-color: $color-primary-light-3;
     }
+
+    /* ドロップ先として選択されている状態 */
+    &--hover {
+      background-color: $color-primary-light-3;
+      border-style: solid;
+      border-width: 2px;
+    }
+  }
+
+  &__drop-zone-label {
+    pointer-events: none; /* SortableJSの判定を妨げない */
+  }
+
+  /* ドロップ先のグループを枠線で明示する */
+  &__children--drop-target {
+    outline: 2px dashed rgba(33, 150, 243, 0.55);
+    outline-offset: 2px;
+    border-radius: $radius-sm;
+  }
+
+  /* ドラッグ中は子コンテナに最小高さを確保し、狭いグループでも狙えるようにする */
+  &__children--dragging {
+    min-height: $size-drop-zone + 8px;
+    align-content: center;
+    border-radius: $radius-sm;
+    transition: background-color 0.2s;
+  }
+
+  /* 空グループはドロップ領域として明示する */
+  &__children--empty {
+    min-height: $size-add-zone + 6px;
+    background-color: $color-primary-light-1;
+    border: 1px dashed $color-primary;
+
+    &:hover {
+      background-color: $color-primary-light-3;
+    }
+  }
+
+  &__children-hint {
+    pointer-events: none; /* SortableJSの当たり判定を妨げない */
+    height: 100%;
   }
 
   /* Scale Classes */
@@ -671,6 +853,60 @@ div.psm-node {
   &__leaf-container {
     vertical-align: top;
     max-width: 180px; /* 横並びが崩れないための制限 */
+  }
+
+  /* BREAK区切り (<hr>のように横幅いっぱい)
+     ※ &__xxx は親セレクタ(div.psm-node)と結合して div.psm-node__xxx になるため、
+        span要素にも当たるようクラスのみのセレクタで指定する */
+  .psm-node__break {
+    cursor: pointer;
+    padding: 4px 2px;
+    border-radius: $radius-sm;
+    background-color: rgba(255, 152, 0, 0.06);
+    transition: background-color 0.2s;
+    user-select: none;
+
+    &:hover {
+      background-color: rgba(255, 152, 0, 0.14);
+    }
+  }
+
+  .psm-node__break-line {
+    flex: 1 1 auto;
+    min-width: 12px;
+    align-self: center;
+    border-top: 2px dashed rgba(255, 152, 0, 0.7); /* オレンジの破線で区切りを明示 */
+    font-size: 0;
+    line-height: 0;
+  }
+
+  .psm-node__break-label {
+    font-size: $font-size-xs;
+    font-weight: bold;
+    letter-spacing: 0.18em;
+    color: #ffb74d;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    text-shadow: 0 0 4px rgba(255, 152, 0, 0.35);
+  }
+
+  .psm-node__break--disabled {
+    background-color: rgba(255, 255, 255, 0.02);
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .psm-node__break-line {
+      border-top-color: rgba(158, 158, 158, 0.45);
+      border-top-style: dotted;
+    }
+    .psm-node__break-label {
+      color: $color-text-grey;
+      text-decoration: line-through;
+      text-shadow: none;
+    }
   }
 
   &__weight-container {

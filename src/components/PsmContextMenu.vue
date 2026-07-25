@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, watch, nextTick, ref } from "vue";
+import { computed, watch, nextTick } from "vue";
 import {
   state,
   addItem,
   startEdit,
   duplicateItem,
   startDeleteConfirm,
-  teleportItem,
+  subdivideGroup,
+  canUseAiClassify,
+  openMoveDialog,
 } from "../store";
 import { PsmItem } from "../types";
 import { useI18n } from "../composables/useI18n";
@@ -30,57 +32,37 @@ const localShow = computed({
   set: (val) => emit("update:show", val),
 });
 
+/** AI分類が使えるか (OpenAI互換プロバイダ設定時のみ) */
+const aiAvailable = computed(() => canUseAiClassify());
+
 /**
- * 「移動先」の候補となる全てのグループ（およびルート）を再帰的に収集する。
- * 循環参照を防ぐため、自分自身とその子孫は除外する。
+ * グループ直下のアイテムをサブ分類でグループ化する
+ * @param useAI ルールで未分類だったタグをAIで補完するか
  */
-const moveTargets = computed(() => {
-  if (!props.targetItem) return [];
-
-  const targets: { id: number | string; name: string; list: PsmItem[]; level: number }[] = [];
-
-  // ルート (Roots) - level 0
-  targets.push({ id: "root-pos", name: t("positive"), list: state.positive, level: 0 });
-  targets.push({ id: "root-neg", name: t("negative"), list: state.negative, level: 0 });
-
-  // 再帰的な収集を行う関数
-  const collect = (nodes: PsmItem[], level: number) => {
-    for (const node of nodes) {
-      // 自分自身はスキップ
-      if (node.id === props.targetItem?.id) continue;
-
-      if (node.is_group) {
-        // グループをターゲットとして追加
-        targets.push({
-          id: node.id,
-          name: node.name || "(No Name)",
-          list: node.children || [], // null防止
-          level: level,
-        });
-
-        // 子が存在する場合は再帰探索
-        if (node.children) {
-          collect(node.children, level + 1);
-        }
-      }
+const onSubdivide = async (useAI: boolean) => {
+  const item = props.targetItem;
+  if (!item?.is_group) return;
+  emit("update:show", false);
+  try {
+    const created = await subdivideGroup(item, useAI);
+    if (created === 0) {
+      alert(t("subdivideNoResult"));
     }
-  };
-
-  collect(state.positive, 0);
-  collect(state.negative, 0);
-
-  // ターゲットリストが現在の親と同じ場合は除外する処理を入れることも可能だが、
-  // 現状はユーザー操作に任せる（同じ場所への移動は何もしないのと同義）。
-
-  return targets;
-});
-
-const handleMove = async (targetList: PsmItem[]) => {
-  if (props.targetItem) {
-    await teleportItem(props.targetItem, targetList, "move-menu");
-    localShow.value = false;
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e));
   }
 };
+
+/**
+ * 移動先クイック選択ダイアログを開く
+ * 移動先の収集・絞り込み・実行はダイアログ側 (PsmMoveDialog) が担当する
+ */
+const onOpenMoveDialog = () => {
+  if (!props.targetItem) return;
+  localShow.value = false;
+  openMoveDialog(props.targetItem);
+};
+
 const menuStyle = computed(() => {
   const h = window.innerHeight;
   // シンプルな座標シフト: 画面下部ならY座標を上にずらす
@@ -99,52 +81,6 @@ const menuStyle = computed(() => {
     zIndex: 20000000,
   };
 });
-
-const submenuOpen = ref(false);
-const moveToActivator = ref<{ $el?: HTMLElement; focus?: () => void } | null>(null); // Ref for focus management
-
-const activatorId = "psm-dummy-activator"; // Unique ID for positioning
-let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
-
-const onMouseEnter = () => {
-  if (hoverTimeout) clearTimeout(hoverTimeout);
-  submenuOpen.value = true;
-};
-
-const onMouseLeave = () => {
-  hoverTimeout = setTimeout(() => {
-    submenuOpen.value = false;
-    // Don't force focus back on mouse leave automatically, as user might just be moving mouse away
-  }, 200);
-};
-
-const onSubmenuLeft = () => {
-  submenuOpen.value = false;
-  nextTick(() => {
-    if (moveToActivator.value?.$el) {
-       moveToActivator.value.$el.focus();
-    } else if (moveToActivator.value?.focus) {
-       moveToActivator.value.focus();
-    }
-  });
-};
-
-// Open and focus logic for keyboard
-const openSubmenuAndFocus = () => {
-  submenuOpen.value = true;
-  nextTick(() => {
-    setTimeout(() => {
-      const subMenus = document.querySelectorAll(".psm-submenu-content");
-      const subMenu = subMenus[subMenus.length - 1]; 
-      if (subMenu) {
-         const firstItem = subMenu.querySelector(".v-list-item") as HTMLElement;
-         if (firstItem) firstItem.focus();
-      }
-    }, 50);
-  });
-};
-
-
 
 watch(localShow, async (val) => {
   if (val) {
@@ -174,7 +110,8 @@ watch(localShow, async (val) => {
     :z-index="20000000"
     content-class="psm-context-menu-content"
   >
-    <v-list density="compact" width="220" elevation="24">
+    <!-- 項目名が省略されないよう min-width で余裕を持たせる (固定widthだと日本語ラベルが切れる) -->
+    <v-list density="compact" min-width="280" elevation="24">
       <!-- 新規追加 -->
       <v-list-item
         prepend-icon="mdi-file-plus"
@@ -223,77 +160,36 @@ watch(localShow, async (val) => {
       ></v-list-item>
       <v-divider></v-divider>
 
-      <!-- 移動 (Move To) -->
-      <!-- Activator Item (Placed directly in list) -->
-      <v-list-item
-        ref="moveToActivator"
-        prepend-icon="mdi-folder-move"
-        :title="t('moveTo')"
-        append-icon="mdi-chevron-right"
-        @click.stop
-        @mouseenter="onMouseEnter"
-        @mouseleave="onMouseLeave"
-        @keydown.right.stop.prevent="openSubmenuAndFocus"
-        style="position: relative;"
-      >
-         <!-- Dummy Activator: Invisble, non-interactive overlay for positioning -->
-         <!-- Vuetify attaches listeners here, but pointer-events: none prevents them from firing -->
-         <div :id="activatorId" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; visibility: hidden;"></div>
-      </v-list-item>
-
-      <!-- Submenu (Decoupled, positioned by ID) -->
-      <v-menu
-        v-model="submenuOpen"
-        :activator="`#${activatorId}`"
-        location="end"
-        :open-delay="0"
-        :close-delay="0"
-        :open-on-click="false"
-        :open-on-hover="false"
-        :open-on-focus="false"
-        :z-index="20000005"
-        content-class="psm-submenu-content"
-      >
-        <!-- ターゲット一覧 -->
-        <v-list 
-          density="compact" 
-          max-height="300" 
-          width="250" 
-          class="overflow-y-auto"
-          @mouseenter="onMouseEnter"
-          @mouseleave="onMouseLeave"
+      <!-- サブ分類でグループ化 (グループのみ) -->
+      <template v-if="targetItem?.is_group">
+        <!-- 説明は subtitle ではなくツールチップに置き、メニュー幅を圧迫しない -->
+        <v-list-item
+          prepend-icon="mdi-file-tree"
+          @click="onSubdivide(false)"
+          data-testid="ctx-subdivide"
         >
-           <!-- ルート (Roots) -->
-           <v-list-subheader>{{ t('roots') }}</v-list-subheader>
-           <v-list-item
-             v-for="target in moveTargets.filter(t => t.id === 'root-pos' || t.id === 'root-neg')"
-             :key="target.id"
-             :title="target.name"
-             @click="handleMove(target.list)"
-             prepend-icon="mdi-folder-home"
-             @keydown.left.stop.prevent="onSubmenuLeft"
-           ></v-list-item>
-           
-           <v-divider class="my-1"></v-divider>
-           
-           <!-- グループ (Groups) -->
-           <v-list-subheader>{{ t('groups') }}</v-list-subheader>
-           <template v-for="target in moveTargets.filter(t => t.id !== 'root-pos' && t.id !== 'root-neg')" :key="target.id">
-             <!-- 循環参照防止ロジックはcomputed側で処理済み -->
-             <v-list-item
-               :title="target.name"
-               @click="handleMove(target.list)"
-               prepend-icon="mdi-folder-open-outline"
-               :style="{ 'padding-left': (16 + target.level * 20) + 'px' }"
-               @keydown.left.stop.prevent="onSubmenuLeft"
-             ></v-list-item>
-           </template>
-           
-           <v-list-item v-if="moveTargets.length <= 2" disabled>
-             <span class="text-caption text-grey">{{ t('noGroups') }}</span>
-           </v-list-item>
-        </v-list>
-      </v-menu>
+          <v-list-item-title :title="t('subdivideGroupHint')">{{ t('subdivideGroup') }}</v-list-item-title>
+        </v-list-item>
+        <v-list-item
+          v-if="aiAvailable"
+          prepend-icon="mdi-robot-outline"
+          @click="onSubdivide(true)"
+          data-testid="ctx-subdivide-ai"
+        >
+          <v-list-item-title :title="t('subdivideGroupAiHint')">{{ t('subdivideGroupAi') }}</v-list-item-title>
+        </v-list-item>
+        <v-divider></v-divider>
+      </template>
+
+      <!-- 移動 (Move To): 検索付きダイアログを開く
+           グループ数が多いとサブメニューから探すのが困難なため、ダイアログ方式に変更 -->
+      <v-list-item
+        prepend-icon="mdi-folder-move"
+        @click="onOpenMoveDialog"
+        data-testid="ctx-move-to"
+      >
+        <v-list-item-title :title="t('moveToHint')">{{ t('moveTo') }}</v-list-item-title>
+      </v-list-item>
 
       <v-divider></v-divider>
 
@@ -321,4 +217,11 @@ watch(localShow, async (val) => {
 
 <style scoped>
 /* Specific tweak for submenu arrow if needed */
+
+/* 項目名を省略せず1行で表示する (日本語ラベルが途中で切れるのを防ぐ) */
+:deep(.v-list-item-title) {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
 </style>
