@@ -221,6 +221,15 @@ const isDynamicPrompt = computed(() => {
   return /^__.+__$/.test(content.trim());
 });
 
+/**
+ * BREAK区切りアイテムかどうか (末尾カンマ・大文字小文字を許容)
+ * 該当する場合は <hr> のような横幅いっぱいの区切り線として表示する
+ */
+const isBreak = computed(() => {
+  if (props.item.is_group) return false;
+  return /^break,?$/i.test((props.item.content || "").trim());
+});
+
 const isDuplicate = computed(() => {
   if (props.item.is_group) return false;
   if (!isEffectiveEnabled.value) return false;
@@ -287,7 +296,7 @@ const moveSelf = (dir: 'up' | 'down') => {
     v-if="isVisible"
     :id="'node-' + item.id"
     class="psm-node mb-1"
-    :class="item.is_group ? 'w-100' : ''"
+    :class="(item.is_group || isBreak) ? 'w-100' : ''"
   >
     <div
       v-if="item.is_group"
@@ -523,6 +532,43 @@ const moveSelf = (dir: 'up' | 'down') => {
       </div>
     </div>
 
+    <!-- BREAK Divider (横幅いっぱいの区切り線) -->
+    <div
+      v-else-if="isBreak"
+      class="psm-node__break d-flex align-center w-100"
+      :class="{
+        'psm-node__break--disabled': !isEffectiveEnabled,
+        'psm-node--focused': state.focusedItemId === item.id
+      }"
+      :title="t('doubleClickToEdit')"
+      @click.stop="handleClickLeaf"
+      @dblclick.stop="startEdit(item)"
+      @contextmenu.prevent.stop="openContextMenu?.($event, item, parentChildren)"
+      data-testid="break-divider"
+    >
+      <v-icon
+        size="16"
+        class="psm-cursor-grab psm-node__drag-handle flex-shrink-0 mr-1"
+        color="grey-lighten-1"
+      >mdi-drag-vertical</v-icon>
+
+      <span class="psm-node__break-line"></span>
+
+      <span class="psm-node__break-label flex-shrink-0 px-2">
+        <v-icon size="14" class="mr-1">mdi-format-page-break</v-icon>BREAK
+      </span>
+
+      <span class="psm-node__break-line"></span>
+
+      <v-icon
+        size="16"
+        class="ml-1 flex-shrink-0 psm-node__hover-opacity"
+        @click.stop="startEdit(item)"
+        :title="t('edit')"
+        data-testid="edit-item-btn"
+      >mdi-pencil</v-icon>
+    </div>
+
     <div v-else class="d-inline-flex flex-column align-center ga-0 psm-node__leaf-container">
       <v-chip
         :color="chipColor"
@@ -714,6 +760,60 @@ div.psm-node {
   &__leaf-container {
     vertical-align: top;
     max-width: 180px; /* 横並びが崩れないための制限 */
+  }
+
+  /* BREAK区切り (<hr>のように横幅いっぱい)
+     ※ &__xxx は親セレクタ(div.psm-node)と結合して div.psm-node__xxx になるため、
+        span要素にも当たるようクラスのみのセレクタで指定する */
+  .psm-node__break {
+    cursor: pointer;
+    padding: 4px 2px;
+    border-radius: $radius-sm;
+    background-color: rgba(255, 152, 0, 0.06);
+    transition: background-color 0.2s;
+    user-select: none;
+
+    &:hover {
+      background-color: rgba(255, 152, 0, 0.14);
+    }
+  }
+
+  .psm-node__break-line {
+    flex: 1 1 auto;
+    min-width: 12px;
+    align-self: center;
+    border-top: 2px dashed rgba(255, 152, 0, 0.7); /* オレンジの破線で区切りを明示 */
+    font-size: 0;
+    line-height: 0;
+  }
+
+  .psm-node__break-label {
+    font-size: $font-size-xs;
+    font-weight: bold;
+    letter-spacing: 0.18em;
+    color: #ffb74d;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    text-shadow: 0 0 4px rgba(255, 152, 0, 0.35);
+  }
+
+  .psm-node__break--disabled {
+    background-color: rgba(255, 255, 255, 0.02);
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .psm-node__break-line {
+      border-top-color: rgba(158, 158, 158, 0.45);
+      border-top-style: dotted;
+    }
+    .psm-node__break-label {
+      color: $color-text-grey;
+      text-decoration: line-through;
+      text-shadow: none;
+    }
   }
 
   &__weight-container {

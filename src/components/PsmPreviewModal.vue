@@ -10,7 +10,10 @@ import {
   getCompiledPrompts,
   computePromptDiff,
   getWebUIRawPrompts,
+  estimateTokenCount,
+  CLIP_CHUNK_SIZE,
   PromptDiffResult,
+  TokenEstimate,
 } from "../store";
 import PsmModal from "./PsmModal.vue";
 import { useI18n } from "../composables/useI18n";
@@ -30,6 +33,7 @@ interface PreviewSection {
   compiled: string;
   diff: PromptDiffResult;
   tagCount: number;
+  tokens: TokenEstimate;
 }
 
 /** モーダル表示時のみ計算する (WebUIテキストエリアの読み取りを含むため) */
@@ -44,6 +48,7 @@ const sections = computed<PreviewSection[] | null>(() => {
       compiled,
       diff: computePromptDiff(oldStr, compiled),
       tagCount: compiled ? compiled.split(",").filter((s) => s.trim()).length : 0,
+      tokens: estimateTokenCount(compiled),
     };
   };
   return [
@@ -84,6 +89,15 @@ const onApply = () => {
             <span class="text-subtitle-2 font-weight-bold" :class="sec.labelClass">{{ sec.label }}</span>
             <span class="text-caption text-grey">
               {{ sec.tagCount }} tags / {{ sec.compiled.length }} chars
+            </span>
+            <!-- トークン数の概算 (SD系はチャンク数も表示) -->
+            <span
+              class="text-caption"
+              :class="state.modelMode === 'anima' ? 'text-grey' : (sec.tokens.chunks > 1 ? 'text-warning' : 'text-grey')"
+              :title="t('tokenHint')"
+            >
+              ≈{{ sec.tokens.tokens }} {{ t('tokenUnit') }}<template v-if="state.modelMode !== 'anima'">
+                ({{ sec.tokens.chunks }}×{{ CLIP_CHUNK_SIZE }})</template>
             </span>
             <span v-if="sec.diff.added || sec.diff.removed" class="text-caption">
               <span class="text-success">+{{ sec.diff.added }}</span>

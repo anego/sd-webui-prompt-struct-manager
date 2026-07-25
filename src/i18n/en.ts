@@ -152,6 +152,8 @@ export const en = {
   previewRemoved: "Removed",
   previewCommon: "Unchanged",
   previewNoChange: "No changes",
+  tokenUnit: "tokens",
+  tokenHint: "Approximate token count (exact numbers depend on the model's tokenizer). For SD models, the number of 75-token chunks is also shown.",
   headerColorLabel: "Header Background Color",
   headerColorClear: "None",
   headerColorCustom: "Custom color",

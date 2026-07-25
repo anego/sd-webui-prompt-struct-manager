@@ -153,6 +153,8 @@ export const ja = {
   previewRemoved: "削除",
   previewCommon: "共通",
   previewNoChange: "変更なし",
+  tokenUnit: "トークン",
+  tokenHint: "トークン数の概算値です (正確な数はモデルのトークナイザに依存します)。SD系では75トークン単位のチャンク数も表示します。",
   headerColorLabel: "ヘッダ背景色",
   headerColorClear: "色なし",
   headerColorCustom: "カスタム色",

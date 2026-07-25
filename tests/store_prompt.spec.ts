@@ -692,6 +692,70 @@ describe("状態スナップショット「プロファイル」機能", () => {
 });
 
 // -------------------------------------------------------------------------
+// 11. トークン数の概算 (estimateTokenCount) のテスト
+// -------------------------------------------------------------------------
+import { estimateTokenCount, CLIP_CHUNK_SIZE } from "../src/store";
+
+describe("estimateTokenCount - トークン数の概算", () => {
+  it("11.1 空文字は0トークン・1チャンクを返すこと", () => {
+    expect(estimateTokenCount("")).toEqual({ tokens: 0, chunks: 1, breaks: 0 });
+    expect(estimateTokenCount("   ")).toEqual({ tokens: 0, chunks: 1, breaks: 0 });
+  });
+
+  it("11.2 短い単語は1トークン、カンマも1トークンとして数えること", () => {
+    // "1girl" (1) + カンマ (1) + "solo" (1) + カンマ (1) = 4
+    expect(estimateTokenCount("1girl, solo").tokens).toBe(4);
+  });
+
+  it("11.3 長い単語は複数トークンとして概算すること", () => {
+    // 7文字以上は分割されやすいため加算される
+    const short = estimateTokenCount("cat").tokens;
+    const long = estimateTokenCount("extraordinarily").tokens;
+    expect(long).toBeGreaterThan(short);
+  });
+
+  it("11.4 拡張ネットワーク構文 (<lora:...>) はカウントしないこと", () => {
+    // LoRAはエンコード前に除去されるため、タグのみのカウントと一致する
+    const withLora = estimateTokenCount("1girl, <lora:my_style_v2:0.8>, solo").tokens;
+    const without = estimateTokenCount("1girl, solo").tokens;
+    expect(withLora).toBe(without);
+  });
+
+  it("11.5 強調構文の括弧と重み指定をカウントしないこと", () => {
+    expect(estimateTokenCount("(masterpiece:1.4)").tokens)
+      .toBe(estimateTokenCount("masterpiece").tokens);
+    expect(estimateTokenCount("((detailed))").tokens)
+      .toBe(estimateTokenCount("detailed").tokens);
+  });
+
+  it("11.6 BREAK はトークンに数えず、チャンク境界を強制すること", () => {
+    // Arrange: BREAK前後に1タグずつ
+    const r = estimateTokenCount("1girl, BREAK, solo");
+
+    // Assert: トークンは 1girl(1)+,(1) + solo(1)+,(1) = 4、BREAKでチャンクが分かれる
+    expect(r.tokens).toBe(4);
+    expect(r.breaks).toBe(1);
+    expect(r.chunks).toBe(2);
+  });
+
+  it("11.7 75トークンを超えるとチャンク数が増えること", () => {
+    // Arrange: 短いタグを大量に並べる (1タグ = 単語1 + カンマ1 = 2トークン)
+    const many = Array.from({ length: 60 }, () => "cat").join(", ");
+    const r = estimateTokenCount(many);
+
+    // Assert
+    expect(r.tokens).toBeGreaterThan(CLIP_CHUNK_SIZE);
+    expect(r.chunks).toBe(Math.ceil(r.tokens / CLIP_CHUNK_SIZE));
+  });
+
+  it("11.8 自然言語の長文もカウントできること", () => {
+    const r = estimateTokenCount("An anime girl with long hair is standing in a field.");
+    expect(r.tokens).toBeGreaterThan(8);
+    expect(r.chunks).toBe(1);
+  });
+});
+
+// -------------------------------------------------------------------------
 // 9. 反映前プレビューの差分計算 (Phase 5A) のテスト
 // -------------------------------------------------------------------------
 import { computePromptDiff, suggestCategoryForGroup, bulkAssignCategories } from "../src/store";

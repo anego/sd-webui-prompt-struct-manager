@@ -18,6 +18,7 @@
   - Score tags (`score_7`, `score_8_up`, etc. — used by Anima / Pony models)
   - 3-character emoticon tags (`^_^`, `>_<`, `@_@`, `0_0`, etc.)
   - Extra network syntax (`<lora:name_v2:0.8>`, `<hypernet:...>`, etc.)
+- **BREAK Divider Styling:** Items whose content is just `BREAK` are rendered as a **full-width divider** (orange dashed line with a centered label) instead of a normal chip, making prompt separation points obvious at a glance. Dragging, double-click editing, and enable/disable all work as with normal items (disabled state shows a grey dashed line with strikethrough).
 - **Tag Autocomplete Integration:** If `a1111-sd-webui-tagcomplete` is enabled, tag suggestions are available when typing prompts.
 - **Memo:** Attach memos to each prompt, viewable via tooltips.
 
@@ -39,6 +40,9 @@
 - **Full compiled output:** Shows the final output string for both Positive and Negative. In Anima mode, the actual category-ordered result is displayed.
 - **Tag-level diff:** Compares against the current WebUI textarea content, showing added tags in green, removed tags in red (struck through), and unchanged tags as outlined chips. Duplicate tags are compared by occurrence count.
 - **Statistics:** Displays tag count, character count, and added/removed counts (`+3 / -1`). Shows "No changes" when there is no difference.
+- **Approximate token count:** Shown as `≈30 tokens (1×75)`. A live-updating estimate also appears in the pane headers (Positive / Negative), turning a warning color in SD mode when the prompt crosses a 75-token chunk boundary.
+  - Extra network syntax (`<lora:...>`), attention parentheses, and weight values are not counted since they are stripped before encoding. `BREAK` is treated as forcing a chunk boundary.
+  - This is an estimate only (exact counts depend on the model's tokenizer). Anima uses a different tokenizer (Qwen3) with no chunk concept, so chunk info is omitted.
 - **Apply from preview:** The "Apply Now" button runs the normal apply flow (including duplicate checking).
 
 ### 1.6 Duplicate Detection

@@ -1143,6 +1143,91 @@ export const getCompiledPrompts = (nodes: PsmItem[], separator = ", ", applyCate
 // 反映前プレビュー (Phase 5A)
 // -------------------------------------------------------------------------
 
+// -------------------------------------------------------------------------
+// トークン数の概算 (プレビュー表示用)
+// -------------------------------------------------------------------------
+
+/** SD系 (CLIP) の1チャンクあたりのトークン上限 */
+export const CLIP_CHUNK_SIZE = 75;
+
+export interface TokenEstimate {
+  /** 概算トークン数 (BREAKによるパディングを含まない実トークン数) */
+  tokens: number;
+  /** 75トークンチャンク数 (BREAKによる強制改チャンクを考慮) */
+  chunks: number;
+  /** BREAKの出現回数 */
+  breaks: number;
+}
+
+/**
+ * プロンプト文字列のトークン数を概算する (純関数)
+ *
+ * 注意: 正確なトークン数はモデルのトークナイザに依存するため、あくまで目安。
+ * CLIP系 (SD1/SDXL) のBPEを単語長ベースで近似している。
+ * Anima等 (Qwen3系) は別トークナイザのため参考値として扱う。
+ *
+ * 除外・特殊処理:
+ * - 拡張ネットワーク構文 `<lora:...>` はエンコード前に除去されるためカウントしない
+ * - 強調構文の括弧・重み (`(tag:1.2)`) はカウントしない
+ * - カンマは1トークンとして数える
+ * - `BREAK` はチャンク境界を強制する (現チャンクを75までパディング)
+ */
+export const estimateTokenCount = (text: string): TokenEstimate => {
+  if (!text || !text.trim()) return { tokens: 0, chunks: 1, breaks: 0 };
+
+  // 拡張ネットワーク構文を除去 (エンコード対象外)
+  let s = text.replace(/<[^>]*>/g, " ");
+
+  let tokens = 0;
+  let breaks = 0;
+  let chunkUsed = 0; // 現チャンクの使用トークン数
+  let completedChunks = 0;
+
+  const addTokens = (n: number) => {
+    tokens += n;
+    chunkUsed += n;
+    while (chunkUsed > CLIP_CHUNK_SIZE) {
+      chunkUsed -= CLIP_CHUNK_SIZE;
+      completedChunks++;
+    }
+  };
+
+  for (const rawSegment of s.split(",")) {
+    const segment = rawSegment.trim();
+
+    if (/^break$/i.test(segment)) {
+      // BREAK: 現チャンクを閉じる (パディング)
+      breaks++;
+      if (chunkUsed > 0) {
+        completedChunks++;
+        chunkUsed = 0;
+      }
+      continue;
+    }
+
+    if (segment) {
+      // 強調構文の記号と重み指定を除去してから単語を数える
+      const cleaned = segment
+        .replace(/\\[()[\]]/g, " ")   // エスケープ済みの括弧
+        .replace(/[()[\]]/g, " ")     // 強調用の括弧
+        .replace(/:\s*[\d.]+/g, " ")  // 重み指定 (:1.2)
+        .trim();
+
+      for (const word of cleaned.split(/\s+/)) {
+        if (!word) continue;
+        // CLIP BPEの近似: 短い一般語は1トークン、長い語は分割されやすい
+        const len = word.length;
+        addTokens(len <= 6 ? 1 : 1 + Math.ceil((len - 6) / 4));
+      }
+      // 区切りのカンマ自体も1トークン
+      addTokens(1);
+    }
+  }
+
+  const chunks = Math.max(1, completedChunks + (chunkUsed > 0 ? 1 : 0));
+  return { tokens, chunks, breaks };
+};
+
 export interface PromptDiffToken {
   text: string;
   kind: "added" | "removed" | "common";
