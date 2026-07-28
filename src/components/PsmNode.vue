@@ -513,8 +513,10 @@ const moveSelf = (dir: 'up' | 'down') => {
           </div>
         </template>
         <template #item="{ element }">
-          <!-- ドロップ直後に一時的に描画されるだけの要素 (グループを開くと通常表示へ切り替わる) -->
-          <span class="text-caption">{{ element.name || element.content }}</span>
+          <!-- SortableJSはリストの各要素に対応するDOMを必要とするが、
+               ここで内容を描画するとゾーンが配下のプロンプト全件分に膨らんでしまう。
+               要素は生成しつつCSSで非表示にし、ゾーンの高さを一定に保つ -->
+          <span class="psm-node__drop-zone-item" :data-id="element.id"></span>
         </template>
       </draggable>
 
@@ -771,6 +773,9 @@ div.psm-node {
 
   &__drop-zone {
     min-height: $size-drop-zone;
+    /* 配下の要素数に関わらずゾーンの高さを一定に保つ (レイアウト崩れの保険) */
+    max-height: $size-drop-zone + 12px;
+    overflow: hidden;
     background-color: $color-primary-light-1;
     border: 1px dashed $color-primary;
     border-radius: $radius-sm;
@@ -790,6 +795,12 @@ div.psm-node {
 
   &__drop-zone-label {
     pointer-events: none; /* SortableJSの判定を妨げない */
+  }
+
+  /* 閉じたグループのドロップゾーン内に描画される各アイテム。
+     内容は表示せず、ゾーンが配下の件数で膨らまないようにする */
+  &__drop-zone-item {
+    display: none;
   }
 
   /* ドロップ先のグループを枠線で明示する */
