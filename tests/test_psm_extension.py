@@ -529,3 +529,103 @@ def test_save_prompts_preserves_unknown_keys(test_client: TestClient, temp_exten
         saved = yaml.safe_load(f)
     assert saved["future_feature_key"] == {"some": "data"}
     assert saved["positive"] == [{"id": 1, "text": "1girl"}]
+
+# -------------------------------------------------------------------------
+# 生成設定プロファイル (/psm/generation-profiles) のテスト (Phase 6)
+# -------------------------------------------------------------------------
+
+def test_get_generation_profiles_empty(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    generation_profiles.json が未作成の場合、空のプロファイル一覧が返ることを検証します。
+    """
+    # Act
+    response = test_client.get("/psm/generation-profiles")
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json() == {"profiles": []}
+
+def test_save_and_get_generation_profiles(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    生成設定プロファイルの保存（/psm/generation-profiles POST）と
+    取得（/psm/generation-profiles GET）が正しく行えるかを検証します。
+    """
+    # Arrange
+    profiles_payload: Dict[str, List[object]] = {
+        "profiles": [
+            {
+                "name": "Anime Standard",
+                "fields": ["checkpoint", "steps", "cfg_scale"],
+                "settings": {"checkpoint": "animagineXL.safetensors", "steps": 28, "cfg_scale": 6.0},
+                "updatedAt": "2026-08-01T12:00:00+09:00",
+            }
+        ]
+    }
+
+    # Act
+    save_response = test_client.post("/psm/generation-profiles", json=profiles_payload)
+
+    # Assert
+    assert save_response.status_code == 200
+    assert save_response.json() == {"status": "success"}
+
+    get_response = test_client.get("/psm/generation-profiles")
+    assert get_response.status_code == 200
+    assert get_response.json() == profiles_payload
+
+def test_save_generation_profiles_overwrites_previous(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    保存は配列を丸ごと上書きする方式であり、前回保存分が完全に置き換わることを検証します。
+    """
+    # Arrange
+    first_payload: Dict[str, List[object]] = {
+        "profiles": [{"name": "A", "fields": ["steps"], "settings": {"steps": 20}, "updatedAt": "2026-08-01T00:00:00Z"}]
+    }
+    second_payload: Dict[str, List[object]] = {
+        "profiles": [{"name": "B", "fields": ["seed"], "settings": {"seed": 42}, "updatedAt": "2026-08-01T01:00:00Z"}]
+    }
+
+    # Act
+    test_client.post("/psm/generation-profiles", json=first_payload)
+    test_client.post("/psm/generation-profiles", json=second_payload)
+    get_response = test_client.get("/psm/generation-profiles")
+
+    # Assert
+    assert get_response.json() == second_payload
+
+def test_generation_profiles_file_excluded_from_list_files(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    generation_profiles.json はプロンプトYAML一覧 (/psm/list-files) の対象に
+    含まれないことを検証します（.json 拡張子のため .yaml グロブの対象外）。
+    """
+    # Arrange
+    test_client.post("/psm/generation-profiles", json={"profiles": []})
+    save_dir: str = str(config.get_psm_dir())
+    with open(os.path.join(save_dir, "prompt.yaml"), "w", encoding="utf-8") as f:
+        f.write("")
+
+    # Act
+    response = test_client.get("/psm/list-files")
+
+    # Assert
+    assert response.json() == {"files": ["prompt.yaml"]}
+
+def test_generation_profiles_stored_separately_from_prompt_yaml(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    生成設定プロファイルの保存が、同名のプロンプトYAMLファイルの内容に一切影響しないことを検証します。
+    """
+    # Arrange
+    test_client.post("/psm/save-prompts", json={
+        "file": "my_prompts.yaml",
+        "positive": [{"id": 1, "text": "1girl"}],
+        "negative": [],
+    })
+
+    # Act
+    test_client.post("/psm/generation-profiles", json={
+        "profiles": [{"name": "P", "fields": ["checkpoint"], "settings": {"checkpoint": "x.safetensors"}, "updatedAt": "2026-08-01T00:00:00Z"}]
+    })
+    get_response = test_client.get("/psm/get-prompts?file=my_prompts.yaml")
+
+    # Assert: プロンプトYAML側は変化しない
+    assert get_response.json()["positive"] == [{"id": 1, "text": "1girl"}]

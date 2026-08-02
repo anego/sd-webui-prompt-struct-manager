@@ -275,6 +275,38 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
             print(f"[PSM ERROR] rename-file failed: {e}")
             return JSONResponse(content={"status": "error", "message": str(e)})
 
+    @app.get("/psm/generation-profiles")
+    async def get_generation_profiles(request: Request) -> JSONResponse:
+        """
+        生成設定プロファイル (Checkpoint/VAE/Sampler等) の一覧を返します。
+        プロンプトYAMLとは独立した generation_profiles.json から読み込みます。
+        """
+        try:
+            data = storage.get_generation_profiles_data()
+            return JSONResponse(content=data)
+        except Exception as e:
+            print(f"[PSM ERROR] get-generation-profiles failed: {e}")
+            return JSONResponse(content={"profiles": []})
+
+    @app.post("/psm/generation-profiles")
+    async def save_generation_profiles(request: Request) -> JSONResponse:
+        """
+        生成設定プロファイルの一覧を generation_profiles.json へ丸ごと上書き保存します。
+        """
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse(content={"status": "error", "message": "Invalid JSON body"})
+
+            profiles_list = body.get("profiles", [])
+            result = storage.save_generation_profiles_data(
+                profiles_list if isinstance(profiles_list, list) else []
+            )
+            return JSONResponse(content=result)
+        except Exception as e:
+            print(f"[PSM ERROR] save-generation-profiles failed: {e}")
+            return JSONResponse(content={"status": "error", "message": str(e)})
+
     @app.delete("/psm/delete-file")
     async def delete_file(request: Request) -> JSONResponse:
         """

@@ -33,11 +33,16 @@ def get_psm_dir() -> Path:
 
     return DEFAULT_DIR.resolve()
 
+def get_generation_profiles_path() -> Path:
+    """
+    生成設定プロファイル (Checkpoint/VAE/Sampler等) の保存先パスを解決します。
+    プロンプトYAML群とは独立して、保存先ディレクトリ直下の固定ファイル名で管理します。
+    """
+    return get_psm_dir() / "generation_profiles.json"
+
 def get_config_data() -> Dict[str, Union[bool, str]]:
-    """
-    config.json から設定データを取得します。
-    is_configured は config.json 自体の存在有無で決定します。
-    """
+    """config.json から設定データを取得します。
+    is_configured は config.json 自体の存在有無で決定します。"""
     config_path: Path = EXTENSION_DIR / "config.json"
     exists: bool = config_path.exists() and config_path.is_file()
     

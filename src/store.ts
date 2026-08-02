@@ -1,6 +1,7 @@
 import { reactive, watch } from "vue";
-import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile } from "./types";
 import { Logger, setDebugMode } from "./log";
+import { GENERATION_FIELDS, getActiveTabPrefix, captureGenerationSettings } from "./generationFields";
 
 /**
  * アプリケーション全体のリアクティブな状態管理オブジェクト
@@ -73,6 +74,10 @@ export const state = reactive({
   profiles: [] as PsmProfile[],
   /** 現在選択（適用）されているプロファイル名 */
   selectedProfileName: "",
+  /** 保存されている生成設定プロファイル (Checkpoint/Sampler等、プロンプトYAMLとは別ファイルで管理) */
+  generationProfiles: [] as PsmGenerationProfile[],
+  /** 直近に適用（選択）した生成設定プロファイル名 */
+  selectedGenerationProfileName: "",
   /** 非同期処理実行中フラグ */
   isLoading: false,
   /** ローディングテキストの翻訳キー */
@@ -473,6 +478,109 @@ export const deleteProfile = async (name: string) => {
       state.selectedProfileName = "";
     }
     await savePrompts();
+  }
+};
+
+// -------------------------------------------------------------------------
+// 生成設定プロファイル (Phase 6: Checkpoint/VAE/Sampler等のWebUI生成設定)
+// プロンプトのメインYAMLとは独立した generation_profiles.json に保存される
+// -------------------------------------------------------------------------
+
+/**
+ * サーバーから生成設定プロファイル一覧を読み込む (アプリ起動時に一度呼び出す)
+ */
+export const loadGenerationProfiles = async () => {
+  try {
+    const res = await fetch("/psm/generation-profiles");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.generationProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+    Logger.debug(`[Store/GenerationProfile] 生成設定プロファイルを読み込みました。(${state.generationProfiles.length} 件)`);
+  } catch (e) {
+    Logger.error("[Store/GenerationProfile] 生成設定プロファイルの読み込みに失敗しました。", e);
+  }
+};
+
+const saveGenerationProfilesToServer = async () => {
+  try {
+    const res = await fetch("/psm/generation-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profiles: state.generationProfiles }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (e) {
+    Logger.error("[Store/GenerationProfile] 生成設定プロファイルの保存に失敗しました。", e);
+  }
+};
+
+/**
+ * 現在のWebUIの状態から、指定されたフィールドのみを名前を付けて保存する
+ * @param name プロファイル名
+ * @param fields 保存対象として選択されたフィールドID一覧
+ */
+export const saveGenerationProfile = async (name: string, fields: GenerationFieldId[]) => {
+  if (!name.trim() || fields.length === 0) return;
+  const settings = captureGenerationSettings(fields);
+  const profile: PsmGenerationProfile = {
+    name,
+    fields,
+    settings,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const existingIdx = state.generationProfiles.findIndex(p => p.name === name);
+  if (existingIdx !== -1) {
+    state.generationProfiles[existingIdx] = profile;
+  } else {
+    state.generationProfiles.push(profile);
+  }
+  await saveGenerationProfilesToServer();
+  Logger.info(`[Store/GenerationProfile] 生成設定プロファイル「${name}」を保存しました。(項目: ${fields.join(", ")})`);
+};
+
+/**
+ * 生成設定プロファイルをWebUIへ適用する。
+ * 各項目のDOM要素が見つからない等の理由で書き換えに失敗した場合は
+ * skippedFields として返すため、呼び出し側で「適用に失敗した」等のメッセージに利用できる。
+ */
+export const applyGenerationProfile = async (name: string): Promise<{ appliedFields: GenerationFieldId[]; skippedFields: GenerationFieldId[] }> => {
+  const profile = state.generationProfiles.find(p => p.name === name);
+  const result = { appliedFields: [] as GenerationFieldId[], skippedFields: [] as GenerationFieldId[] };
+  if (!profile) {
+    Logger.warn(`[Store/GenerationProfile] 指定された生成設定プロファイル「${name}」が見つかりませんでした。`);
+    return result;
+  }
+
+  const prefix = getActiveTabPrefix();
+  for (const id of profile.fields) {
+    const def = GENERATION_FIELDS.find(f => f.id === id);
+    const value = profile.settings[id];
+    if (!def || value === undefined) continue;
+    const ok = def.apply(prefix, value);
+    if (ok) {
+      result.appliedFields.push(id);
+    } else {
+      result.skippedFields.push(id);
+    }
+  }
+
+  Logger.info(`[Store/GenerationProfile] 生成設定プロファイル「${name}」を適用しました。(適用: ${result.appliedFields.join(", ") || "なし"} / 失敗: ${result.skippedFields.join(", ") || "なし"})`);
+  state.selectedGenerationProfileName = name;
+  return result;
+};
+
+/**
+ * 指定された名前の生成設定プロファイルを削除する
+ */
+export const deleteGenerationProfile = async (name: string) => {
+  const idx = state.generationProfiles.findIndex(p => p.name === name);
+  if (idx !== -1) {
+    state.generationProfiles.splice(idx, 1);
+    if (state.selectedGenerationProfileName === name) {
+      state.selectedGenerationProfileName = "";
+    }
+    await saveGenerationProfilesToServer();
   }
 };
 
@@ -1112,10 +1220,7 @@ export const pickDirectory = async () => {
  * メインのtxt2img/img2img画面からDOM経由で値を取得
  */
 export const getWebUIData = () => {
-  const prefix =
-    document.getElementById("img2img_generate")?.offsetParent !== null
-      ? "img2img"
-      : "txt2img";
+  const prefix = getActiveTabPrefix();
   const getVal = (id: string) =>
     (
       document

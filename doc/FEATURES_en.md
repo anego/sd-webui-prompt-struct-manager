@@ -194,6 +194,15 @@
 ### 4.5 Anima Template
 - **New-file option:** Turning on "Create with Anima template" in the new file dialog initializes the file with categorized group scaffolding (Quality / Year / Subject / Character / Series / Artist / General), Anima's officially recommended quality and negative tags, and Anima mode.
 
-## 5. Developer Features (Dev Mode)
+## 5. Generation Setting Profiles (Phase 6)
+- **Overview:** Choose which of Checkpoint / Sampling Steps / CFG Scale / Width / Height / Seed to save via checkboxes, and save them as a named profile. Saving and applying happen independently of reflecting prompts to the WebUI, and can be done at any time.
+  - Sampling Method / Schedule Type / VAE / Text Encoder are not offered as savable fields at all, since their dropdown-based WebUI implementation cannot be reliably auto-applied (the feature avoids fields that can be saved but never actually applied).
+- **Save and apply have separate entry points:** A dedicated toolbar dropdown lists saved profiles — picking one applies it to the WebUI immediately. The adjacent save button (🖫) opens the checkbox-based save dialog, and the delete button (🗑) removes whichever profile is currently selected in the dropdown. This mirrors the layout of the existing prompt "Profile" feature (enabled/weight snapshots), so it should feel familiar.
+- **Choose fields per profile:** You can freely choose which fields each profile stores — e.g. a profile that only pins the Checkpoint, or one that bundles a full set of generation parameters.
+- **Stored separately:** Saved to `generation_profiles.json` directly under the save directory, completely independent from prompt YAML files. The same list of generation setting profiles is available regardless of which prompt file is currently open.
+- **Applying to the WebUI:** Selecting a profile in the toolbar dropdown pushes all of its saved values into the WebUI immediately. A snackbar notification only appears if a field unexpectedly fails to apply (e.g. an unusual page layout).
+- **Live current-value preview:** In the save dialog, each checkbox shows the field's current WebUI value in real time below it, so you can confirm what you're about to save.
+
+## 6. Developer Features (Dev Mode)
 - **Debug Log:** Detailed debug info is output to the console only in Dev Mode via `src/log.ts`.
 - **Import:** An external import feature (experimental) is displayed in the UI only when in developer mode.

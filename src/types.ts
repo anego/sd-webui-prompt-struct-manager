@@ -102,3 +102,40 @@ export interface PsmProfile {
  * 重複プロンプトのチェック設定モード
  */
 export type DuplicateCheckMode = "none" | "warn" | "error";
+
+/**
+ * 生成設定プロファイルが管理できる項目のID (Phase 6)
+ * WebUIのCheckpoint/Sampling Steps等のうち、どの項目を保存・適用の対象にするかを表す。
+ * VAE / Sampling Method / Schedule Type はWebUI側のドロップダウン実装の都合上、
+ * 自動適用を確実に行えないため対象外としている（保存専用の項目は設けない方針）。
+ */
+export type GenerationFieldId =
+  | "checkpoint"
+  | "steps"
+  | "cfg_scale"
+  | "width"
+  | "height"
+  | "seed";
+
+/**
+ * 生成設定の値の集合 (プロファイルの fields に含まれるキーのみ値を持つ)
+ */
+export interface PsmGenerationSettings {
+  checkpoint?: string;
+  steps?: number;
+  cfg_scale?: number;
+  width?: number;
+  height?: number;
+  seed?: number;
+}
+
+/**
+ * 生成設定プロファイル (名前を付けて保存する、WebUI生成設定のスナップショット)
+ * プロンプトのメインYAMLとは独立した generation_profiles.json に保存される
+ */
+export interface PsmGenerationProfile {
+  name: string;
+  fields: GenerationFieldId[];
+  settings: PsmGenerationSettings;
+  updatedAt: string;
+}

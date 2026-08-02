@@ -61,6 +61,28 @@ export interface PsmProfile {
   name: string;         // プロファイル名
   states: PsmProfileState[]; // 各アイテムの状態リスト
 }
+
+// 生成設定プロファイル (Phase 6) が扱えるWebUI項目のID
+// VAE / Sampling Method / Schedule Type はドロップダウン実装の都合上、自動適用を
+// 確実に行えないため対象外としている (保存専用の項目は設けない方針)。
+export type GenerationFieldId =
+  | "checkpoint" | "steps" | "cfg_scale" | "width" | "height" | "seed";
+
+export interface PsmGenerationSettings {
+  checkpoint?: string;
+  steps?: number;
+  cfg_scale?: number;
+  width?: number;
+  height?: number;
+  seed?: number;
+}
+
+export interface PsmGenerationProfile {
+  name: string;               // プロファイル名
+  fields: GenerationFieldId[]; // このプロファイルが保存・適用の対象とする項目
+  settings: PsmGenerationSettings; // fields に含まれるキーのみ値を持つ
+  updatedAt: string;          // ISO8601
+}
 ```
 
 ## 2. YAML ファイル構造
@@ -102,7 +124,31 @@ profiles:
 - **model_mode:** 対象モデルのモード。未定義・不正値は `sd` にフォールバック（後方互換）。
 - **未知キーの保持:** 保存時、既存ファイルにある未知のルートキーはそのまま引き継がれます（将来バージョンとの相互運用性のため）。
 
-## 3. 設定データ (`localStorage` / `config.json`)
+## 3. 生成設定プロファイルファイル (`generation_profiles.json`) (Phase 6)
+保存先ディレクトリ直下に配置される、プロンプトYAML群とは独立したファイル。Checkpoint/Sampling Steps等のWebUI生成設定を、名前を付けて保存したプロファイルの一覧を保持する。`.json` 拡張子のため `list-files`（プロンプトファイル一覧）には含まれない。
+
+```json
+{
+  "profiles": [
+    {
+      "name": "Anime Standard",
+      "fields": ["checkpoint", "steps", "cfg_scale"],
+      "settings": {
+        "checkpoint": "animagineXL.safetensors",
+        "steps": 28,
+        "cfg_scale": 6.0
+      },
+      "updatedAt": "2026-08-01T12:00:00+09:00"
+    }
+  ]
+}
+```
+
+- **fields:** このプロファイルが保存・適用の対象とする項目のIDリスト。保存時にチェックボックスで選択した項目のみが記録される。
+- **settings:** `fields` に含まれるキーのみ値を持つ。保存時にDOMから読み取れなかった項目は省略される。
+- **対象項目:** `checkpoint` / `steps` / `cfg_scale` / `width` / `height` / `seed` の6項目。いずれもWebUIへの自動適用に対応する（VAE / Sampling Method / Schedule Typeは自動適用を確実に行えないため、対象項目そのものに含めていない）。
+
+## 4. 設定データ (`localStorage` / `config.json`)
 
 ### `config.json` (Server-side)
 Pythonバックエンドが管理する設定ファイル。
