@@ -61,6 +61,28 @@ export interface PsmProfile {
   name: string;         // Profile name
   states: PsmProfileState[]; // State list for each item
 }
+
+// WebUI generation setting fields that a generation setting profile can manage (Phase 6)
+// VAE / Sampling Method / Schedule Type are excluded because their dropdown-based
+// WebUI implementation cannot be reliably auto-applied (no save-only fields are offered).
+export type GenerationFieldId =
+  | "checkpoint" | "steps" | "cfg_scale" | "width" | "height" | "seed";
+
+export interface PsmGenerationSettings {
+  checkpoint?: string;
+  steps?: number;
+  cfg_scale?: number;
+  width?: number;
+  height?: number;
+  seed?: number;
+}
+
+export interface PsmGenerationProfile {
+  name: string;                // Profile name
+  fields: GenerationFieldId[]; // Fields this profile saves / applies
+  settings: PsmGenerationSettings; // Only holds values for keys included in fields
+  updatedAt: string;           // ISO8601
+}
 ```
 
 ## 2. YAML File Structure
@@ -102,7 +124,31 @@ profiles:
 - **model_mode:** Target model mode. Undefined or invalid values fall back to `sd` (backward compatible).
 - **Unknown key preservation:** On save, unknown root keys found in the existing file are carried over (forward compatibility with future versions).
 
-## 3. Configuration Data (`localStorage` / `config.json`)
+## 3. Generation Setting Profiles File (`generation_profiles.json`) (Phase 6)
+Located directly under the save directory, independent from the prompt YAML files. Holds the list of named generation setting profiles (Checkpoint/Sampling Steps etc.). Because of its `.json` extension it is not included in `list-files` (the prompt file list).
+
+```json
+{
+  "profiles": [
+    {
+      "name": "Anime Standard",
+      "fields": ["checkpoint", "steps", "cfg_scale"],
+      "settings": {
+        "checkpoint": "animagineXL.safetensors",
+        "steps": 28,
+        "cfg_scale": 6.0
+      },
+      "updatedAt": "2026-08-01T12:00:00+09:00"
+    }
+  ]
+}
+```
+
+- **fields:** IDs of the fields this profile saves / applies. Only fields checked at save time are recorded.
+- **settings:** Only holds values for keys included in `fields`. Fields that could not be read from the DOM at save time are omitted.
+- **Managed fields:** `checkpoint` / `steps` / `cfg_scale` / `width` / `height` / `seed` — all 6 support automatic apply to the WebUI (VAE / Sampling Method / Schedule Type are not offered at all, since they cannot be reliably auto-applied).
+
+## 4. Configuration Data (`localStorage` / `config.json`)
 
 ### `config.json` (Server-side)
 Configuration file managed by the Python backend.

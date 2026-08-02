@@ -185,7 +185,24 @@ export const ja = {
   headerColorCustom: "カスタム色",
   add: "追加",
   done: "完了",
-  
+
+  // Generation Profile (Phase 6)
+  genProfileTitle: "生成設定プロファイル",
+  genProfileSaveTitle: "生成設定を保存",
+  genProfileHint: "Checkpoint・Sampling Steps等のWebUI生成設定のうち、保存したい項目を選んで名前を付けて保存します。プロンプトファイルとは別の共有ファイルに保存され、ツールバーのプルダウンから選ぶと即座にWebUIへ適用されます。",
+  genProfileSelectAll: "全て選択",
+  genProfileSelectNone: "全て解除",
+  genProfileCurrentValue: "現在値",
+  genProfileApplyDone: "適用しました。",
+  genProfileApplyPartial: "{fields} の適用に失敗しました。WebUIの画面をご確認のうえ、手動で設定してください。",
+  newGenProfileName: "プロファイル名",
+  genFieldCheckpoint: "Checkpoint",
+  genFieldSteps: "Sampling Steps",
+  genFieldCfgScale: "CFG Scale",
+  genFieldWidth: "Width",
+  genFieldHeight: "Height",
+  genFieldSeed: "Seed",
+
   // Delete Dialog
   deleteConfirmTitle: "削除確認",
   reallyDelete: "本当によろしいですか？",

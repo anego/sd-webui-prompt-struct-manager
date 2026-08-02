@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, provide, computed } from "vue";
 import {
   state,
   loadPrompts,
+  loadGenerationProfiles,
   listFiles,
   getCompiledPrompts,
   savePrompts,
@@ -21,8 +22,11 @@ import {
   saveProfile,
   applyProfile,
   deleteProfile,
+  applyGenerationProfile,
+  deleteGenerationProfile,
 } from "./store";
 import { PsmItem } from "./types";
+import { GENERATION_FIELDS } from "./generationFields";
 import PsmEditModal from "./components/PsmEditModal.vue";
 import PsmDeleteDialog from "./components/PsmDeleteDialog.vue";
 import PsmTreePane from "./components/PsmTreePane.vue";
@@ -36,6 +40,7 @@ import PsmSetupWizard from "./components/PsmSetupWizard.vue";
 import PsmPreviewModal from "./components/PsmPreviewModal.vue";
 import PsmInfotextDialog from "./components/PsmInfotextDialog.vue";
 import PsmMoveDialog from "./components/PsmMoveDialog.vue";
+import PsmGenerationProfileDialog from "./components/PsmGenerationProfileDialog.vue";
 import { useI18n } from "./composables/useI18n";
 
 const { t } = useI18n();
@@ -58,6 +63,8 @@ const dialogs = ref({
   profileDelete: false,
   preview: false,
   infotext: false,
+  genProfile: false,
+  genProfileDelete: false,
 });
 const newProfileNameInput = ref("");
 
@@ -90,6 +97,41 @@ const handleDeleteProfile = async () => {
   await deleteProfile(state.selectedProfileName);
   dialogs.value.profileDelete = false;
 };
+
+// 生成設定プロファイル: 適用はツールバーのプルダウン選択で即時実行、保存/削除は別ボタンから行う
+const genProfileSnackbar = ref({ show: false, text: "", color: "success" as "success" | "warning" });
+
+const genFieldLabel = (id: string): string => {
+  const def = GENERATION_FIELDS.find((f) => f.id === id);
+  return def ? t(def.labelKey) : id;
+};
+
+const handleGenProfileSelect = async (name: string) => {
+  if (!name) return;
+  console.debug(`[PSM] ユーザーによって生成設定プロファイル「${name}」が選択されたため、WebUIへの適用を開始します。`);
+  const r = await applyGenerationProfile(name);
+  if (r.skippedFields.length > 0) {
+    genProfileSnackbar.value = {
+      show: true,
+      color: "warning",
+      text: t("genProfileApplyPartial", { fields: r.skippedFields.map(genFieldLabel).join(" / ") }),
+    };
+  } else if (r.appliedFields.length > 0) {
+    genProfileSnackbar.value = { show: true, color: "success", text: t("genProfileApplyDone") };
+  }
+};
+
+const openDeleteGenProfileDialog = () => {
+  if (!state.selectedGenerationProfileName) return;
+  dialogs.value.genProfileDelete = true;
+};
+
+const handleDeleteGenProfile = async () => {
+  if (!state.selectedGenerationProfileName) return;
+  await deleteGenerationProfile(state.selectedGenerationProfileName);
+  dialogs.value.genProfileDelete = false;
+};
+
 const duplicateDialog = ref({ show: false, mode: "warn" as "warn" | "error" });
 const menuState = ref({ visible: false, x: 0, y: 0, items: [] as unknown[] });
 
@@ -345,6 +387,7 @@ onMounted(async () => {
   if (state.isConfigured) {
     await listFiles();
     await loadPrompts();
+    await loadGenerationProfiles();
   }
 });
 
@@ -545,6 +588,45 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
             </v-btn>
           </div>
 
+          <!-- 生成設定プロファイル: 選択で即時適用、保存/削除は別ボタン (Phase 6) -->
+          <div class="d-flex align-center ga-2 mr-2" style="width: 240px;">
+            <v-select
+              v-model="state.selectedGenerationProfileName"
+              :items="state.generationProfiles.map(p => p.name)"
+              :label="t('genProfileTitle')"
+              density="compact"
+              hide-details
+              variant="outlined"
+              :menu-props="{ zIndex: 20000010 }"
+              @update:modelValue="handleGenProfileSelect"
+              class="flex-grow-1"
+              style="max-width: 180px;"
+              attach
+              data-testid="gen-profile-select"
+            ></v-select>
+            <v-btn
+              icon
+              size="x-small"
+              @click.stop="dialogs.genProfile = true"
+              :title="t('genProfileSaveTitle')"
+              color="primary"
+              data-testid="open-gen-profile-save-btn"
+            >
+              <v-icon size="small">mdi-content-save</v-icon>
+            </v-btn>
+            <v-btn
+              icon
+              size="x-small"
+              :disabled="!state.selectedGenerationProfileName"
+              @click.stop="openDeleteGenProfileDialog"
+              :title="t('deleteProfile')"
+              color="error"
+              data-testid="delete-gen-profile-btn"
+            >
+              <v-icon size="small">mdi-delete</v-icon>
+            </v-btn>
+          </div>
+
           <v-spacer></v-spacer>
           <div class="d-flex align-center ga-2 mr-2">
             <v-btn
@@ -650,6 +732,8 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 
       <PsmInfotextDialog v-model="dialogs.infotext" />
 
+      <PsmGenerationProfileDialog v-model="dialogs.genProfile" />
+
       <PsmMoveDialog />
 
       <PsmContextMenu
@@ -720,7 +804,39 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
           </v-card-actions>
         </v-card>
       </v-dialog>
-      
+
+      <!-- 生成設定プロファイル削除確認ダイアログ (Phase 6) -->
+      <v-dialog v-model="dialogs.genProfileDelete" max-width="400" attach>
+        <v-card>
+          <v-card-title class="text-h6 pb-2">
+            ⚠️ {{ t('deleteProfile') }}
+          </v-card-title>
+          <v-card-text>
+            {{ t('confirmProfileDelete') }}
+            <div class="mt-2 text-subtitle-1 font-weight-bold text-orange">
+              "{{ state.selectedGenerationProfileName }}"
+            </div>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn variant="text" @click="dialogs.genProfileDelete = false" data-testid="gen-profile-delete-cancel-btn">
+              {{ t('cancel') }}
+            </v-btn>
+            <v-btn color="error" variant="elevated" @click="handleDeleteGenProfile" data-testid="gen-profile-delete-confirm-btn">
+              {{ t('delete') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <v-snackbar
+        v-model="genProfileSnackbar.show"
+        :color="genProfileSnackbar.color"
+        timeout="4000"
+        attach
+        data-testid="gen-profile-snackbar"
+      >{{ genProfileSnackbar.text }}</v-snackbar>
+
       <PsmDuplicateConfirmDialog
         v-model="duplicateDialog.show"
         :mode="duplicateDialog.mode"

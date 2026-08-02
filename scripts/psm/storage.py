@@ -1,3 +1,4 @@
+import json
 import shutil
 import yaml
 from pathlib import Path
@@ -158,4 +159,43 @@ def delete_yaml_file(file_name: str) -> Dict[str, str]:
         return {"status": "error", "message": "File not found"}
     except Exception as e:
         print(f"[PSM ERROR] delete_yaml_file failed for {file_name}: {e}")
+        return {"status": "error", "message": str(e)}
+
+def get_generation_profiles_data() -> Dict[str, List[object]]:
+    """
+    生成設定プロファイル (Checkpoint/VAE/Sampler等) の一覧を generation_profiles.json から読み込みます。
+    プロンプトYAML群とは独立したファイルのため、list_yaml_files() の対象には含まれません。
+    """
+    empty_structure: Dict[str, List[object]] = {"profiles": []}
+    try:
+        path: Path = config.get_generation_profiles_path()
+        if not path.exists() or not path.is_file():
+            return empty_structure
+
+        with path.open('r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return empty_structure
+
+        profiles = data.get("profiles")
+        return {"profiles": profiles if isinstance(profiles, list) else []}
+    except Exception as e:
+        print(f"[PSM ERROR] get_generation_profiles_data failed: {e}")
+        return empty_structure
+
+def save_generation_profiles_data(profiles_list: List[object]) -> Dict[str, str]:
+    """
+    生成設定プロファイルの一覧を generation_profiles.json へ丸ごと上書き保存します。
+    """
+    try:
+        path: Path = config.get_generation_profiles_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with path.open('w', encoding='utf-8') as f:
+            json.dump({"profiles": profiles_list}, f, ensure_ascii=False, indent=2)
+
+        return {"status": "success"}
+    except Exception as e:
+        print(f"[PSM ERROR] save_generation_profiles_data failed: {e}")
         return {"status": "error", "message": str(e)}

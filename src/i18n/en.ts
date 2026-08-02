@@ -185,7 +185,24 @@ export const en = {
   add: "Add",
   done: "Done",
   reset: "Reset",
-  
+
+  // Generation Profile (Phase 6)
+  genProfileTitle: "Generation Setting Profiles",
+  genProfileSaveTitle: "Save Generation Settings",
+  genProfileHint: "Choose which WebUI generation settings (Checkpoint, Sampling Steps, etc.) to save as a named profile. Stored in a shared file separate from prompt files, and applied to the WebUI immediately when selected from the toolbar dropdown.",
+  genProfileSelectAll: "Select All",
+  genProfileSelectNone: "Select None",
+  genProfileCurrentValue: "Current",
+  genProfileApplyDone: "Applied.",
+  genProfileApplyPartial: "Failed to apply {fields}. Please check the WebUI and set them manually.",
+  newGenProfileName: "Profile Name",
+  genFieldCheckpoint: "Checkpoint",
+  genFieldSteps: "Sampling Steps",
+  genFieldCfgScale: "CFG Scale",
+  genFieldWidth: "Width",
+  genFieldHeight: "Height",
+  genFieldSeed: "Seed",
+
   // Delete Dialog
   deleteConfirmTitle: "Delete Confirmation",
   reallyDelete: "Are you sure?",

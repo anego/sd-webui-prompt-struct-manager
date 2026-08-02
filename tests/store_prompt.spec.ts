@@ -1870,7 +1870,7 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
 // -------------------------------------------------------------------------
 // 8. カテゴリ整列とAnimaテンプレート (Phase 3) のテスト
 // -------------------------------------------------------------------------
-import { buildAnimaTemplate, createYamlFile } from "../src/store";
+import { buildAnimaTemplate } from "../src/store";
 
 describe("カテゴリ整列とAnimaテンプレート (Phase 3)", () => {
   const grp = (name: string, category: string | undefined, content: string): PsmItem => ({
@@ -2143,7 +2143,135 @@ describe("非同期処理中のローディングインジケーター表示機�
   });
 });
 
+// -------------------------------------------------------------------------
+// 13. 生成設定プロファイル機能のテスト (Phase 6)
+// -------------------------------------------------------------------------
+import {
+  loadGenerationProfiles,
+  saveGenerationProfile,
+  applyGenerationProfile,
+  deleteGenerationProfile,
+} from "../src/store";
 
+describe("生成設定プロファイル機能 (Phase 6)", () => {
+  beforeEach(() => {
+    state.generationProfiles = [];
+  });
 
+  it("13.1 loadGenerationProfiles: サーバーから一覧を取得しstateへ反映すること", async () => {
+    // Arrange
+    const savedProfiles = [
+      { name: "P1", fields: ["checkpoint"], settings: { checkpoint: "a.safetensors" }, updatedAt: "2026-08-01T00:00:00Z" },
+    ];
+    const mockResponse = { ok: true, json: async () => ({ profiles: savedProfiles }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await loadGenerationProfiles();
+
+    // Assert
+    expect(state.generationProfiles).toEqual(savedProfiles);
+    expect(fetch).toHaveBeenCalledWith("/psm/generation-profiles");
+  });
+
+  it("13.2 saveGenerationProfile: 選択したフィールドのみを現在のWebUI状態から保存すること", async () => {
+    // Arrange
+    vi.stubGlobal("document", {
+      getElementById: vi.fn().mockReturnValue({ offsetParent: null }), // txt2img と判定させる
+      querySelector: vi.fn().mockImplementation((sel: string) => {
+        if (sel === "#setting_sd_model_checkpoint input") return { value: "modelA.safetensors" };
+        if (sel === "#txt2img_steps input") return { value: "25" };
+        return null;
+      }),
+    });
+    const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await saveGenerationProfile("MyGenProfile", ["checkpoint", "steps"]);
+
+    // Assert: 選択していない cfg_scale 等は含まれない
+    expect(state.generationProfiles.length).toBe(1);
+    expect(state.generationProfiles[0].name).toBe("MyGenProfile");
+    expect(state.generationProfiles[0].fields).toEqual(["checkpoint", "steps"]);
+    expect(state.generationProfiles[0].settings).toEqual({ checkpoint: "modelA.safetensors", steps: 25 });
+    expect(fetch).toHaveBeenCalledWith("/psm/generation-profiles", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("13.3 saveGenerationProfile: 同名プロファイルは新しい値で上書きされること", async () => {
+    // Arrange
+    state.generationProfiles = [
+      { name: "MyGenProfile", fields: ["steps"], settings: { steps: 10 }, updatedAt: "2026-01-01T00:00:00Z" },
+    ];
+    vi.stubGlobal("document", {
+      getElementById: vi.fn().mockReturnValue({ offsetParent: null }),
+      querySelector: vi.fn().mockImplementation((sel: string) =>
+        sel === "#txt2img_steps input" ? { value: "40" } : null
+      ),
+    });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+
+    // Act
+    await saveGenerationProfile("MyGenProfile", ["steps"]);
+
+    // Assert
+    expect(state.generationProfiles.length).toBe(1);
+    expect(state.generationProfiles[0].settings).toEqual({ steps: 40 });
+  });
+
+  it("13.4 applyGenerationProfile: 書き込みに成功した項目はappliedFields、要素が見つからず失敗した項目はskippedFieldsに分類されること", async () => {
+    // Arrange: steps用のinput要素は存在するが、cfg_scale用は見つからない状況を再現
+    const dispatchEvent = vi.fn();
+    const stepsInput = { value: "", dispatchEvent };
+    state.generationProfiles = [
+      {
+        name: "MixedProfile",
+        fields: ["steps", "cfg_scale"],
+        settings: { steps: 30, cfg_scale: 7 },
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+    vi.stubGlobal("document", {
+      getElementById: vi.fn().mockReturnValue({ offsetParent: null }), // txt2img
+      querySelector: vi.fn().mockImplementation((sel: string) =>
+        sel === "#txt2img_steps input" ? stepsInput : null
+      ),
+    });
+
+    // Act
+    const result = await applyGenerationProfile("MixedProfile");
+
+    // Assert: steps は書き込み成功、cfg_scale は要素未検出のため失敗扱い
+    expect(result.appliedFields).toEqual(["steps"]);
+    expect(result.skippedFields).toEqual(["cfg_scale"]);
+    expect(stepsInput.value).toBe("30");
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("13.5 applyGenerationProfile: 存在しないプロファイル名の場合は空の結果を返すこと", async () => {
+    // Act
+    const result = await applyGenerationProfile("NoSuchProfile");
+
+    // Assert
+    expect(result).toEqual({ appliedFields: [], skippedFields: [] });
+  });
+
+  it("13.6 deleteGenerationProfile: 指定されたプロファイルを削除しサーバーへ反映すること", async () => {
+    // Arrange
+    state.generationProfiles = [
+      { name: "A", fields: [], settings: {}, updatedAt: "2026-01-01T00:00:00Z" },
+      { name: "B", fields: [], settings: {}, updatedAt: "2026-01-01T00:00:00Z" },
+    ];
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+
+    // Act
+    await deleteGenerationProfile("A");
+
+    // Assert
+    expect(state.generationProfiles.length).toBe(1);
+    expect(state.generationProfiles.find((p) => p.name === "A")).toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith("/psm/generation-profiles", expect.objectContaining({ method: "POST" }));
+  });
+});
 
 
