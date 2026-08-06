@@ -74,6 +74,20 @@
 - **Search Keyword Auto-Copy:** When tags are inserted, the text currently entered in the dictionary's search input field (`input.pd-inline-query`) is automatically copied to the editing prompt's name field (only works if the name field is currently empty, protecting existing inputs).
 - **Graceful Fallback:** If the dictionary extension is not installed (or not found in the DOM), the modal falls back to a clean 1-column layout (width `600px`), and the portal section is hidden (`display: none`). No JS errors or console warnings will occur.
 
+### 1.9 Group Lock
+- **Overview:** Turning on the "Lock" switch (red) in a group header makes that group and everything inside it (including nested subgroups, recursively) completely non-editable. Protects sections you've finished organizing from accidental changes.
+- **What gets locked:** Enable/disable toggling, content/weight edits, duplication, deletion, drag-and-drop moves and reordering, moves via the Move-To dialog, adding new items, subcategory grouping, changes to group settings such as Exclusive/Random mode or category/header color — and the F2/Space/Delete/Insert keyboard shortcuts. All of it is blocked.
+- **Visual indication:** Locked groups are highlighted with a reddish dashed border and hatch pattern, and a lock icon replaces the drag handle in the group header (individual prompts inside simply lose their drag handle, without a lock icon, to avoid visual clutter).
+- **Propagation to nested items:** Locking a parent group cascades the lock to every subgroup and prompt inside it. Unlocking must always start from the outermost locked ancestor — a nested group's own lock switch is disabled while an ancestor is locked.
+- **Excluded from move targets:** Locked groups are also excluded from the destination list in the "Move to..." dialog used for other items.
+
+### 1.10 Group Hiding
+- **Overview:** Hides groups you don't normally touch from the tree to reduce clutter. Set it from the eye icon in a group's hover action icons, or from "Hide" in the right-click menu.
+- **Show/hide toggle:** Clicking the eye icon next to the search filter in each pane (Positive / Negative) turns "Show Hidden Groups" ON/OFF, revealing or re-hiding all hidden groups at once. This is a single global setting shared between the Positive and Negative panes, persisted in local storage so it survives a page reload.
+- **Works with search:** When you type into the search filter, hidden groups' contents are still included in the search results even if "Show Hidden Groups" is OFF — so you can still find something you forgot you hid.
+- **Visual indication:** While "Show Hidden Groups" is ON, hidden groups are shown semi-transparent with a dotted border and an eye-slash badge next to the group name.
+- **Interaction with locking:** A locked group's hidden state cannot be toggled either (treated the same as other group setting changes).
+
 ## 2. User Interface (UI/UX)
 
 ### 2.1 Group Map

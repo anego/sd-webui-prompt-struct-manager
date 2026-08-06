@@ -23,6 +23,8 @@ export interface PsmItem {
   sourceText?: string;  // 翻訳前の原文 (出力には含まれない)
   category?: PsmCategory; // グループのタグカテゴリ (animaモード時の出力整列用)
   headerColor?: string;   // グループヘッダの背景色 (CSSカラー文字列。未指定はデフォルト)
+  isLocked?: boolean;     // グループロックフラグ。true時は自身と配下の全アイテムが編集不可
+  isHidden?: boolean;     // グループ非表示フラグ。true時は「非表示グループの表示」がOFFの間ツリーに表示されない
 
   depth?: number;       // 表示用: 階層の深さ (計算プロパティまたは一時付与)
 }
@@ -170,7 +172,8 @@ Pythonバックエンドが管理する設定ファイル。
   "sidebar_open": true,
   "toggle_shortcut": "Ctrl+Q",
   "duplicate_check_mode": "none",
-  "show_weight_slider": true
+  "show_weight_slider": true,
+  "show_hidden_groups": false
 }
 ```
 

@@ -18,6 +18,7 @@ import {
   beginDrag,
   endDrag,
   finalizeCrossListMove,
+  toggleShowHiddenGroups,
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
 import { useI18n } from "../composables/useI18n";
@@ -112,6 +113,19 @@ const openPane = () => emit("update:isOpen", true);
           @keydown.stop
           clearable
         ></v-text-field>
+
+        <v-btn
+          icon
+          size="x-small"
+          variant="text"
+          :color="state.showHiddenGroups ? 'primary' : 'grey'"
+          class="flex-shrink-0"
+          @click.stop="toggleShowHiddenGroups"
+          :title="t('showHiddenGroups')"
+          data-testid="toggle-show-hidden-groups"
+        >
+          <v-icon>{{ state.showHiddenGroups ? 'mdi-eye' : 'mdi-eye-off' }}</v-icon>
+        </v-btn>
 
         <v-spacer></v-spacer>
 

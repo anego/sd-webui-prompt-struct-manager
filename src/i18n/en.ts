@@ -81,6 +81,10 @@ export const en = {
   randomModeOff: "Random Mode: OFF (Concat all)",
   randomReflection: "Randomize Group",
   exclusiveReflection: "Exclusive Selection (Single)",
+  groupLocked: "Lock",
+  showHiddenGroups: "Show Hidden Groups",
+  hideGroupAction: "Hide",
+  showGroupAction: "Unhide",
 
   enableAll: "Enable All in Group",
   disableAll: "Disable All in Group",

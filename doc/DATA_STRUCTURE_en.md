@@ -23,6 +23,8 @@ export interface PsmItem {
   sourceText?: string;  // Source text before translation (never included in output)
   category?: PsmCategory; // Group tag category (used for output ordering in anima mode)
   headerColor?: string;   // Group header background color (CSS color string; default when omitted)
+  isLocked?: boolean;     // Group lock flag. When true, the group and everything inside it is non-editable
+  isHidden?: boolean;     // Group hidden flag. When true, hidden from the tree while "Show Hidden Groups" is OFF
 
   depth?: number;       // For display: Hierarchy depth (Computed or temp attached)
 }
@@ -170,7 +172,8 @@ Browser-specific UI settings.
   "sidebar_open": true,
   "toggle_shortcut": "Ctrl+Q",
   "duplicate_check_mode": "none",
-  "show_weight_slider": true
+  "show_weight_slider": true,
+  "show_hidden_groups": false
 }
 ```
 

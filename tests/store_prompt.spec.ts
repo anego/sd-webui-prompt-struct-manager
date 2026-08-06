@@ -2274,4 +2274,202 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
   });
 });
 
+// -------------------------------------------------------------------------
+// 14. グループロック機能のテスト (Phase 7)
+// -------------------------------------------------------------------------
+import {
+  isItemLocked,
+  isListLocked,
+  toggleGroupLock,
+  toggleGroupEnabled,
+  deleteItemFromTree,
+  duplicateItem,
+  addItem,
+} from "../src/store";
 
+describe("グループロック機能 (Phase 7)", () => {
+  // 親グループ(ロック対象) > 子グループ > 孫アイテム、という3階層のツリーを構築するヘルパー
+  // state.positive へ格納した「後」の参照 (Vueのreactivityラップ後の実体) を返すことで、
+  // store.ts内部の state.positive を辿る参照比較 (isListLockedの children === list など) と
+  // オブジェクト参照が一致するようにする
+  const buildLockedTree = (parentLocked: boolean) => {
+    const grandChild: PsmItem = {
+      id: 3, name: "grandchild", content: "tag", enabled: true, weight: 1.0, is_group: false,
+    };
+    const childGroup: PsmItem = {
+      id: 2, name: "child", content: "", enabled: true, weight: 1.0, is_group: true, isOpen: true,
+      children: [grandChild],
+    };
+    const parentGroup: PsmItem = {
+      id: 1, name: "parent", content: "", enabled: true, weight: 1.0, is_group: true, isOpen: true,
+      isLocked: parentLocked,
+      children: [childGroup],
+    };
+    state.positive = [parentGroup];
+    state.negative = [];
+    const p = state.positive[0];
+    const c = p.children![0];
+    const g = c.children![0];
+    return { parentGroup: p, childGroup: c, grandChild: g };
+  };
+
+  beforeEach(() => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+  });
+
+  it("14.1 isItemLocked: 自身がロックされている場合はtrueを返すこと", () => {
+    const { parentGroup } = buildLockedTree(true);
+    expect(isItemLocked(parentGroup.id)).toBe(true);
+  });
+
+  it("14.2 isItemLocked: 祖先グループがロックされている場合、孫アイテムも継承してtrueを返すこと", () => {
+    const { grandChild } = buildLockedTree(true);
+    expect(isItemLocked(grandChild.id)).toBe(true);
+  });
+
+  it("14.3 isItemLocked: ロックされていない場合はfalseを返すこと", () => {
+    const { grandChild, childGroup } = buildLockedTree(false);
+    expect(isItemLocked(grandChild.id)).toBe(false);
+    expect(isItemLocked(childGroup.id)).toBe(false);
+  });
+
+  it("14.4 isItemLocked: 存在しないIDの場合はfalseを返すこと", () => {
+    buildLockedTree(false);
+    expect(isItemLocked(999999)).toBe(false);
+  });
+
+  it("14.5 isListLocked: ロック中グループの children はtrueを返すこと", () => {
+    const { parentGroup, childGroup } = buildLockedTree(true);
+    expect(isListLocked(parentGroup.children!)).toBe(true);
+    expect(isListLocked(childGroup.children!)).toBe(true); // 祖先ロックを継承
+  });
+
+  it("14.6 isListLocked: ルート配列 (state.positive/negative) は常にfalseを返すこと", () => {
+    buildLockedTree(true);
+    expect(isListLocked(state.positive)).toBe(false);
+    expect(isListLocked(state.negative)).toBe(false);
+  });
+
+  it("14.7 toggleGroupLock: ロックされていないグループのisLockedをトグルできること", async () => {
+    const { parentGroup } = buildLockedTree(false);
+    await toggleGroupLock(parentGroup);
+    expect(parentGroup.isLocked).toBe(true);
+    await toggleGroupLock(parentGroup);
+    expect(parentGroup.isLocked).toBe(false);
+  });
+
+  it("14.8 toggleGroupLock: 祖先ロック中は、配下グループ自身のロック状態を変更できないこと", async () => {
+    const { parentGroup, childGroup } = buildLockedTree(true);
+    await toggleGroupLock(childGroup, true);
+    expect(childGroup.isLocked).toBeUndefined();
+    expect(parentGroup.isLocked).toBe(true); // 親自体は変化しない
+  });
+
+  it("14.9 toggleGroupEnabled: ロック中のグループは有効/無効を切り替えられないこと", async () => {
+    const { parentGroup } = buildLockedTree(true);
+    const before = parentGroup.enabled;
+    await toggleGroupEnabled(parentGroup);
+    expect(parentGroup.enabled).toBe(before);
+  });
+
+  it("14.10 deleteItemFromTree: ロック中の孫アイテムは削除できないこと", async () => {
+    const { childGroup, grandChild } = buildLockedTree(true);
+    await deleteItemFromTree(grandChild, "all");
+    expect(childGroup.children!.length).toBe(1);
+    expect(childGroup.children![0].id).toBe(grandChild.id);
+  });
+
+  it("14.11 deleteItemFromTree: ロックされていなければ通常どおり削除できること", async () => {
+    const { childGroup, grandChild } = buildLockedTree(false);
+    await deleteItemFromTree(grandChild, "all");
+    expect(childGroup.children!.length).toBe(0);
+  });
+
+  it("14.12 duplicateItem: ロック中の孫アイテムは複製できないこと", async () => {
+    const { childGroup, grandChild } = buildLockedTree(true);
+    await duplicateItem(grandChild, childGroup.children!);
+    expect(childGroup.children!.length).toBe(1);
+  });
+
+  it("14.13 addItem: ロック中グループの children へは新規アイテムを追加できないこと", () => {
+    const { parentGroup } = buildLockedTree(true);
+    const before = parentGroup.children!.length;
+    addItem(parentGroup.children!, false);
+    expect(parentGroup.children!.length).toBe(before);
+  });
+
+  it("14.14 addItem: ロックされていないグループの children へは通常どおり追加できること", () => {
+    const { childGroup } = buildLockedTree(false);
+    const before = childGroup.children!.length;
+    addItem(childGroup.children!, false);
+    expect(childGroup.children!.length).toBe(before + 1);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 15. グループ非表示機能のテスト (Phase 8)
+// -------------------------------------------------------------------------
+import { toggleGroupHidden, toggleShowHiddenGroups } from "../src/store";
+
+describe("グループ非表示機能 (Phase 8)", () => {
+  beforeEach(() => {
+    state.showHiddenGroups = false;
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+  });
+
+  const buildGroup = (isLocked = false): PsmItem => {
+    const group: PsmItem = {
+      id: 1, name: "group", content: "", enabled: true, weight: 1.0, is_group: true, isOpen: true,
+      isLocked,
+      children: [],
+    };
+    state.positive = [group];
+    state.negative = [];
+    return state.positive[0];
+  };
+
+  it("15.1 toggleGroupHidden: isHidden を新規にトグルできること (未設定 -> true -> false)", async () => {
+    const group = buildGroup();
+    expect(group.isHidden).toBeUndefined();
+    await toggleGroupHidden(group);
+    expect(group.isHidden).toBe(true);
+    await toggleGroupHidden(group);
+    expect(group.isHidden).toBe(false);
+  });
+
+  it("15.2 toggleGroupHidden: forceVal を指定した場合はその値になること", async () => {
+    const group = buildGroup();
+    await toggleGroupHidden(group, true);
+    expect(group.isHidden).toBe(true);
+    await toggleGroupHidden(group, true);
+    expect(group.isHidden).toBe(true); // 既にtrueでも変化なし
+  });
+
+  it("15.3 toggleGroupHidden: ロック中のグループは非表示状態を変更できないこと", async () => {
+    const group = buildGroup(true);
+    await toggleGroupHidden(group);
+    expect(group.isHidden).toBeUndefined();
+  });
+
+  it("15.4 toggleShowHiddenGroups: state.showHiddenGroups をトグルし、ローカル設定を保存すること", () => {
+    expect(state.showHiddenGroups).toBe(false);
+    toggleShowHiddenGroups();
+    expect(state.showHiddenGroups).toBe(true);
+    expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+      "psm_settings",
+      expect.stringContaining('"show_hidden_groups":true')
+    );
+    toggleShowHiddenGroups();
+    expect(state.showHiddenGroups).toBe(false);
+  });
+
+  it("15.5 show_hidden_groups のローカルストレージからの復元", () => {
+    mockLocalStorage.getItem.mockReturnValueOnce(JSON.stringify({
+      show_hidden_groups: true,
+      ui_scale: "large",
+    }));
+    state.showHiddenGroups = false;
+    loadSettingsLocal();
+    expect(state.showHiddenGroups).toBe(true);
+  });
+});
