@@ -14,6 +14,8 @@ import {
   setGroupChildrenEnabled,
   toggleItemEnabled,
   toggleGroupExclusive,
+  toggleGroupLock,
+  toggleGroupHidden,
   resetWeight,
   beginDrag,
   endDrag,
@@ -32,6 +34,8 @@ const props = defineProps<{
   parentChildren: PsmItem[];
   isParentDisabled?: boolean;
   parentGroup?: PsmItem;
+  /** 祖先グループがロック中かどうか (グループロック機能。再帰的に子へ伝播する) */
+  locked?: boolean;
 }>();
 const openContextMenu = inject<Function>("psm-context-menu");
 const searchQuery = inject<Ref<string>>("search-query", ref(""));
@@ -40,22 +44,21 @@ const searchQuery = inject<Ref<string>>("search-query", ref(""));
  * 検索クエリに基づいて表示可否を決定する
  * 自分自身または子孫のいずれかが一致すれば表示される (フィルタリング)
  */
-const isVisible = computed(() => {
-  if (!searchQuery.value) return true;
+const matchesSearchQuery = computed(() => {
   const q = searchQuery.value.toLowerCase();
   // Safe match function handling null/undefined
   const match = (s: string | undefined | null) => {
     if (!s) return false;
     return s.toLowerCase().includes(q);
   };
-  
+
   const self =
     match(props.item.name) ||
     match(props.item.content) ||
     match(props.item.memo);
-    
+
   if (self) return true;
-  
+
   if (props.item.is_group && props.item.children) {
     // Recursive check helper
     const check = (nodes: PsmItem[]): boolean => {
@@ -70,7 +73,7 @@ const isVisible = computed(() => {
         }
         // Deep recursion
         if (n.is_group && n.children && check(n.children)) {
-           return true; 
+           return true;
         }
       }
       return false;
@@ -81,11 +84,43 @@ const isVisible = computed(() => {
 });
 
 /**
+ * 非表示グループ機能 (Phase 8): 自身が非表示グループで、
+ * かつ「非表示グループの表示」がOFFの場合にtrueを返す
+ */
+const isHiddenByGroupSetting = computed(() => {
+  return !!props.item.is_group && !!props.item.isHidden && !state.showHiddenGroups;
+});
+
+const isVisible = computed(() => {
+  // 検索中は非表示フラグを無視し、検索マッチのみで可視性を決定する
+  // (非表示にした場所の中身が検索で見つからなくなる事故を防ぐ)
+  if (searchQuery.value) return matchesSearchQuery.value;
+  if (isHiddenByGroupSetting.value) return false;
+  return true;
+});
+
+/**
  * 親が無効化されている場合、子も実質的に無効とみなす
  */
 const isEffectiveEnabled = computed(() => {
   return props.item.enabled && !props.isParentDisabled;
 });
+
+/**
+ * 自身またはいずれかの祖先グループがロック中かどうか (グループロック機能)
+ * true の間は、有効/無効の切り替えを含め一切の編集ができない
+ */
+const effectiveLocked = computed(() => {
+  return !!props.locked || !!props.item.isLocked;
+});
+
+const handleGroupLockToggle = (val: unknown) => {
+  toggleGroupLock(props.item, typeof val === "boolean" ? val : undefined);
+};
+
+const handleGroupHiddenToggle = () => {
+  toggleGroupHidden(props.item);
+};
 
 // Auto-expand on search match
 import { watch } from "vue";
@@ -108,17 +143,17 @@ const childIsParentDisabled = computed(() => {
 });
 
 const handleToggle = () => {
-  if (props.isParentDisabled) return;
+  if (props.isParentDisabled || effectiveLocked.value) return;
   toggleItemEnabled(props.item, props.parentChildren, props.parentGroup);
 };
 
 const handleGroupToggle = () => {
-  if (props.isParentDisabled) return;
+  if (props.isParentDisabled || effectiveLocked.value) return;
   toggleGroupEnabled(props.item);
 };
 
 const handleGroupExclusiveToggle = (val: unknown) => {
-  if (props.isParentDisabled) return;
+  if (props.isParentDisabled || effectiveLocked.value) return;
   toggleGroupExclusive(props.item, typeof val === "boolean" ? val : undefined);
 };
 
@@ -302,6 +337,7 @@ const headerStyle = computed(() => {
 });
 
 const moveSelf = (dir: 'up' | 'down') => {
+  if (effectiveLocked.value) return;
   const idx = props.parentChildren.findIndex(n => n.id === props.item.id);
   if (idx === -1) return;
   
@@ -335,7 +371,9 @@ const moveSelf = (dir: 'up' | 'down') => {
       class="psm-node__group rounded border pa-1"
       :class="[
         isEffectiveEnabled ? 'bg-grey-darken-4' : 'bg-grey-darken-4 opacity-50',
-        item.isRandom ? 'psm-node__group--random' : ''
+        item.isRandom ? 'psm-node__group--random' : '',
+        effectiveLocked ? 'psm-node__group--locked' : '',
+        item.isHidden ? 'psm-node__group--hidden' : ''
       ]"
     >
       <div class="psm-node__add-zone d-flex justify-start ga-2 mb-1">
@@ -369,17 +407,26 @@ const moveSelf = (dir: 'up' | 'down') => {
       >
         <div class="d-flex mr-2 align-center ga-1">
           <v-icon
+            v-if="!effectiveLocked"
             size="20"
             class="psm-cursor-grab psm-node__drag-handle"
             color="grey-lighten-1"
           >mdi-drag-vertical</v-icon>
           <v-icon
+            v-else
+            size="20"
+            color="red-lighten-1"
+            :title="t('groupLocked')"
+          >mdi-lock</v-icon>
+          <v-icon
+            v-if="!effectiveLocked"
             size="24"
             :color="parentChildren.indexOf(item) === 0 ? 'grey-darken-3' : 'grey-lighten-1'"
             class="psm-cursor-pointer psm-node__hover-scale"
             @click.stop="moveSelf('up')"
           >mdi-menu-up</v-icon>
           <v-icon
+            v-if="!effectiveLocked"
             size="24"
             :color="parentChildren.indexOf(item) === parentChildren.length - 1 ? 'grey-darken-3' : 'grey-lighten-1'"
             class="psm-cursor-pointer psm-node__hover-scale"
@@ -389,7 +436,7 @@ const moveSelf = (dir: 'up' | 'down') => {
 
         <v-checkbox-btn
           :model-value="item.enabled"
-          :disabled="isParentDisabled"
+          :disabled="isParentDisabled || effectiveLocked"
           density="compact"
           class="mr-2 flex-grow-0"
           color="primary"
@@ -417,6 +464,16 @@ const moveSelf = (dir: 'up' | 'down') => {
           {{ item.name }}
         </span>
 
+        <!-- 非表示グループが「非表示グループの表示」により再表示されている際の目印 -->
+        <v-icon
+          v-if="item.isHidden"
+          size="small"
+          color="grey"
+          class="ml-1 flex-shrink-0"
+          :title="t('showHiddenGroups')"
+          data-testid="hidden-group-badge"
+        >mdi-eye-off-outline</v-icon>
+
         <!-- Category Badge (「一般」は非表示) -->
         <v-chip
           v-if="categoryBadge"
@@ -435,6 +492,7 @@ const moveSelf = (dir: 'up' | 'down') => {
           density="compact"
           hide-details
           inset
+          :disabled="effectiveLocked"
           :label="t('randomReflection')"
           @update:modelValue="savePrompts"
           @click.stop
@@ -449,6 +507,7 @@ const moveSelf = (dir: 'up' | 'down') => {
           density="compact"
           hide-details
           inset
+          :disabled="effectiveLocked"
           :label="t('exclusiveReflection')"
           @update:modelValue="handleGroupExclusiveToggle"
           @click.stop
@@ -456,9 +515,24 @@ const moveSelf = (dir: 'up' | 'down') => {
           style="min-width: 150px"
         ></v-switch>
 
+        <!-- Inline Lock Switch (グループロック機能) -->
+        <v-switch
+          v-model="item.isLocked"
+          color="red-accent-2"
+          density="compact"
+          hide-details
+          inset
+          :disabled="locked"
+          :label="t('groupLocked')"
+          @update:modelValue="handleGroupLockToggle"
+          @click.stop
+          class="ml-4"
+          style="min-width: 110px"
+        ></v-switch>
+
 
         <!-- Bulk Toggle Buttons (Show on Hover) -->
-        <div class="psm-node__action-buttons d-flex align-center ga-1 ml-4">
+        <div v-if="!effectiveLocked" class="psm-node__action-buttons d-flex align-center ga-1 ml-4">
           <v-btn
             icon
             size="x-small"
@@ -480,6 +554,17 @@ const moveSelf = (dir: 'up' | 'down') => {
           >
             <v-icon>mdi-close-box-multiple-outline</v-icon>
           </v-btn>
+          <v-btn
+            icon
+            size="x-small"
+            variant="text"
+            color="grey"
+            @click.stop="handleGroupHiddenToggle"
+            :title="item.isHidden ? t('showGroupAction') : t('hideGroupAction')"
+            data-testid="toggle-hidden-btn"
+          >
+            <v-icon>{{ item.isHidden ? 'mdi-eye-outline' : 'mdi-eye-off-outline' }}</v-icon>
+          </v-btn>
         </div>
 
         <v-spacer></v-spacer>
@@ -500,6 +585,8 @@ const moveSelf = (dir: 'up' | 'down') => {
         v-model="item.children"
         item-key="id"
         v-bind="DRAG_OPTIONS"
+        :group="{ ...DRAG_OPTIONS.group, put: !effectiveLocked }"
+        :sort="!effectiveLocked"
         class="psm-node__drop-zone d-flex align-center justify-center text-caption text-grey"
         :class="{ 'psm-node__drop-zone--hover': state.dropTargetId === item.id }"
         @start="onDragStart(item.children!, $event)"
@@ -531,6 +618,8 @@ const moveSelf = (dir: 'up' | 'down') => {
           v-model="item.children"
           item-key="id"
           v-bind="DRAG_OPTIONS"
+          :group="{ ...DRAG_OPTIONS.group, put: !effectiveLocked }"
+          :sort="!effectiveLocked"
           class="d-flex flex-wrap align-center ga-1 psm-node__children"
           :class="{
             'psm-node__children--drop-target': state.dropTargetId === item.id,
@@ -559,12 +648,13 @@ const moveSelf = (dir: 'up' | 'down') => {
               :parentChildren="item.children!"
               :is-parent-disabled="childIsParentDisabled"
               :parent-group="item"
+              :locked="effectiveLocked"
             />
 
           </template>
         </draggable>
 
-        <div class="d-flex ga-1 mt-1">
+        <div v-if="!effectiveLocked" class="d-flex ga-1 mt-1">
           <v-btn
             size="x-small"
             variant="flat"
@@ -600,6 +690,7 @@ const moveSelf = (dir: 'up' | 'down') => {
       data-testid="break-divider"
     >
       <v-icon
+        v-if="!effectiveLocked"
         size="16"
         class="psm-cursor-grab psm-node__drag-handle flex-shrink-0 mr-1"
         color="grey-lighten-1"
@@ -614,6 +705,7 @@ const moveSelf = (dir: 'up' | 'down') => {
       <span class="psm-node__break-line"></span>
 
       <v-icon
+        v-if="!effectiveLocked"
         size="16"
         class="ml-1 flex-shrink-0 psm-node__hover-opacity"
         @click.stop="startEdit(item)"
@@ -637,7 +729,11 @@ const moveSelf = (dir: 'up' | 'down') => {
           openContextMenu?.($event, item, parentChildren)
         "
       >
-        <v-icon start :size="iconSize" class="psm-cursor-grab psm-node__drag-handle flex-shrink-0"
+        <v-icon
+          v-if="!effectiveLocked"
+          start
+          :size="iconSize"
+          class="psm-cursor-grab psm-node__drag-handle flex-shrink-0"
           >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
         >
         <span
@@ -662,6 +758,7 @@ const moveSelf = (dir: 'up' | 'down') => {
         >
 
         <v-icon
+          v-if="!effectiveLocked"
           end
           :size="iconSize"
           class="ml-2 psm-node__hover-opacity flex-shrink-0"
@@ -687,13 +784,15 @@ const moveSelf = (dir: 'up' | 'down') => {
           hide-details
           color="orange"
           track-color="grey"
+          :disabled="effectiveLocked"
           class="psm-node__weight-slider flex-grow-1"
           @update:modelValue="savePrompts"
           @click.stop
         ></v-slider>
-        
+
         <!-- Reset Button -->
         <v-btn
+          v-if="!effectiveLocked"
           icon
           size="x-small"
           variant="text"
@@ -768,6 +867,24 @@ div.psm-node {
     &--random {
       border: 1px dashed $color-accent !important;
       background-color: $color-accent-light !important;
+    }
+
+    /* グループロック機能: 編集不可であることを一目で分かるようにする */
+    &--locked {
+      border: 1px dashed rgba(239, 83, 80, 0.7) !important;
+      background-image: repeating-linear-gradient(
+        45deg,
+        rgba(239, 83, 80, 0.06),
+        rgba(239, 83, 80, 0.06) 10px,
+        transparent 10px,
+        transparent 20px
+      );
+    }
+
+    /* グループ非表示機能: 「非表示グループの表示」により再表示中であることを控えめに示す */
+    &--hidden {
+      opacity: 0.6;
+      border-style: dotted !important;
     }
   }
 

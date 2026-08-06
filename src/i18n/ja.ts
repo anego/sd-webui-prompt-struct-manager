@@ -82,6 +82,10 @@ export const ja = {
   randomModeOff: "ランダムモード: OFF (全て連結)",
   randomReflection: "グループ内ランダム反映",
   exclusiveReflection: "グループ内排他選択 (択一)",
+  groupLocked: "ロック",
+  showHiddenGroups: "非表示グループの表示",
+  hideGroupAction: "非表示にする",
+  showGroupAction: "再表示する",
 
   enableAll: "グループ内すべて有効化",
   disableAll: "グループ内すべて無効化",

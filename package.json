@@ -1,6 +1,6 @@
 {
   "name": "sd-webui-psm",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "scripts": {
     "dev": "vite build --watch",
     "build": "node scripts/embed_font.js && vite build",
@@ -26,5 +26,11 @@
   },
   "volta": {
     "node": "24.13.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "immutable": ">=5.1.9",
+      "picomatch": ">=4.0.5"
+    }
   }
 }

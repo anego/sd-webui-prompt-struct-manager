@@ -44,6 +44,17 @@ export interface PsmItem {
    * CSSカラー文字列 (例: "#7f1d1d")。未指定はデフォルト背景
    */
   headerColor?: string;
+  /**
+   * グループロックフラグ (グループ用・Phase 7)
+   * trueの場合、自身および配下の全アイテム（サブグループ含め再帰的）が
+   * 有効/無効の切り替えを含め一切編集できなくなる
+   */
+  isLocked?: boolean;
+  /**
+   * グループ非表示フラグ (グループ用・Phase 8)
+   * trueの場合、サイドバーの「非表示グループの表示」がOFFの間はツリーに表示されない
+   */
+  isHidden?: boolean;
 }
 
 /**

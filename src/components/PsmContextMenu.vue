@@ -9,6 +9,9 @@ import {
   subdivideGroup,
   canUseAiClassify,
   openMoveDialog,
+  isItemLocked,
+  isListLocked,
+  toggleGroupHidden,
 } from "../store";
 import { PsmItem } from "../types";
 import { useI18n } from "../composables/useI18n";
@@ -35,6 +38,15 @@ const localShow = computed({
 /** AI分類が使えるか (OpenAI互換プロバイダ設定時のみ) */
 const aiAvailable = computed(() => canUseAiClassify());
 
+/** 対象アイテム自身（またはいずれかの祖先グループ）がロック中かどうか (グループロック機能) */
+const targetLocked = computed(() => (props.targetItem ? isItemLocked(props.targetItem.id) : false));
+/** 対象アイテムの親リストがロック中かどうか (兄弟としての追加・挿入の可否判定用) */
+const parentLocked = computed(() => isListLocked(props.parentChildren));
+/** 「下に追加」の実際の追加先 (対象がグループならその配下、そうでなければ親リスト) がロック中かどうか */
+const belowTargetLocked = computed(() =>
+  props.targetItem?.is_group ? targetLocked.value : parentLocked.value
+);
+
 /**
  * グループ直下のアイテムをサブ分類でグループ化する
  * @param useAI ルールで未分類だったタグをAIで補完するか
@@ -51,6 +63,15 @@ const onSubdivide = async (useAI: boolean) => {
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }
+};
+
+/**
+ * グループの非表示状態をトグルする (グループ非表示機能)
+ */
+const onToggleHidden = () => {
+  if (!props.targetItem?.is_group) return;
+  emit("update:show", false);
+  toggleGroupHidden(props.targetItem);
 };
 
 /**
@@ -116,6 +137,7 @@ watch(localShow, async (val) => {
       <v-list-item
         prepend-icon="mdi-file-plus"
         :title="t('newPromptBelow')"
+        :disabled="belowTargetLocked"
         @click="
           addItem(
             targetItem!.is_group ? targetItem!.children! : parentChildren,
@@ -126,6 +148,7 @@ watch(localShow, async (val) => {
       <v-list-item
         prepend-icon="mdi-folder-plus"
         :title="t('newGroupBelow')"
+        :disabled="belowTargetLocked"
         @click="
           addItem(
             targetItem!.is_group ? targetItem!.children! : parentChildren,
@@ -139,6 +162,7 @@ watch(localShow, async (val) => {
       <v-list-item
         prepend-icon="mdi-arrow-up"
         :title="t('insertUpPrompt')"
+        :disabled="parentLocked"
         @click="
           addItem(
             parentChildren,
@@ -150,6 +174,7 @@ watch(localShow, async (val) => {
       <v-list-item
         prepend-icon="mdi-arrow-up"
         :title="t('insertUpGroup')"
+        :disabled="parentLocked"
         @click="
           addItem(
             parentChildren,
@@ -165,6 +190,7 @@ watch(localShow, async (val) => {
         <!-- 説明は subtitle ではなくツールチップに置き、メニュー幅を圧迫しない -->
         <v-list-item
           prepend-icon="mdi-file-tree"
+          :disabled="targetLocked"
           @click="onSubdivide(false)"
           data-testid="ctx-subdivide"
         >
@@ -173,11 +199,21 @@ watch(localShow, async (val) => {
         <v-list-item
           v-if="aiAvailable"
           prepend-icon="mdi-robot-outline"
+          :disabled="targetLocked"
           @click="onSubdivide(true)"
           data-testid="ctx-subdivide-ai"
         >
           <v-list-item-title :title="t('subdivideGroupAiHint')">{{ t('subdivideGroupAi') }}</v-list-item-title>
         </v-list-item>
+
+        <!-- 非表示切り替え (グループ非表示機能) -->
+        <v-list-item
+          :prepend-icon="targetItem.isHidden ? 'mdi-eye-outline' : 'mdi-eye-off-outline'"
+          :title="targetItem.isHidden ? t('showGroupAction') : t('hideGroupAction')"
+          :disabled="targetLocked"
+          @click="onToggleHidden"
+          data-testid="ctx-toggle-hidden"
+        ></v-list-item>
         <v-divider></v-divider>
       </template>
 
@@ -185,6 +221,7 @@ watch(localShow, async (val) => {
            グループ数が多いとサブメニューから探すのが困難なため、ダイアログ方式に変更 -->
       <v-list-item
         prepend-icon="mdi-folder-move"
+        :disabled="targetLocked"
         @click="onOpenMoveDialog"
         data-testid="ctx-move-to"
       >
@@ -197,11 +234,13 @@ watch(localShow, async (val) => {
       <v-list-item
         prepend-icon="mdi-pencil"
         :title="t('edit')"
+        :disabled="targetLocked"
         @click="startEdit(targetItem!)"
       ></v-list-item>
       <v-list-item
         prepend-icon="mdi-content-duplicate"
         :title="t('duplicate')"
+        :disabled="targetLocked"
         @click="duplicateItem(targetItem!, parentChildren)"
       ></v-list-item>
       <v-divider></v-divider>
@@ -209,6 +248,7 @@ watch(localShow, async (val) => {
         prepend-icon="mdi-delete"
         :title="t('delete')"
         base-color="error"
+        :disabled="targetLocked"
         @click="startDeleteConfirm(targetItem!, parentChildren)"
       ></v-list-item>
     </v-list>

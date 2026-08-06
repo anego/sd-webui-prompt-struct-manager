@@ -70,6 +70,8 @@ export const state = reactive({
   lastFile: "",
   /** 重みスライダーを表示するかどうか */
   showWeightSlider: true,
+  /** 非表示グループ (isHidden) をツリーに表示するかどうか */
+  showHiddenGroups: false,
   /** 保存されているプロファイル（ツリースナップショット） */
   profiles: [] as PsmProfile[],
   /** 現在選択（適用）されているプロファイル名 */
@@ -144,10 +146,88 @@ export const findParentAndItem = (targetId: number, nodes: PsmItem[], parent: Ps
 };
 
 /**
+ * 指定IDのアイテムが、自身またはいずれかの祖先グループの isLocked によって
+ * 編集不可になっているかを判定する (グループロック機能)
+ */
+export const isItemLocked = (targetId: number): boolean => {
+  const search = (nodes: PsmItem[], lockedAncestor: boolean): boolean | null => {
+    for (const node of nodes) {
+      if (!node) continue;
+      const effectiveLocked = lockedAncestor || !!node.isLocked;
+      if (node.id === targetId) return effectiveLocked;
+      if (node.is_group && node.children) {
+        const found = search(node.children, effectiveLocked);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  };
+  return search(state.positive, false) ?? search(state.negative, false) ?? false;
+};
+
+/**
+ * 指定の children 配列（参照一致）を保持するグループが、自身またはいずれかの
+ * 祖先でロックされているかを判定する (グループロック機能)。
+ * list がルート配列 (state.positive/negative) の場合は常に false。
+ */
+export const isListLocked = (list: PsmItem[]): boolean => {
+  if (list === state.positive || list === state.negative) return false;
+  const search = (nodes: PsmItem[], lockedAncestor: boolean): boolean | null => {
+    for (const node of nodes) {
+      if (!node) continue;
+      const effectiveLocked = lockedAncestor || !!node.isLocked;
+      if (node.is_group && node.children === list) return effectiveLocked;
+      if (node.is_group && node.children) {
+        const found = search(node.children, effectiveLocked);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  };
+  return search(state.positive, false) ?? search(state.negative, false) ?? false;
+};
+
+/**
+ * グループのロック状態をトグルする (グループロック機能)
+ * 祖先グループがロック中の場合、自身の isLocked は変更できない
+ * （ロック解除は必ず祖先から順に行う必要がある）
+ */
+export const toggleGroupLock = async (group: PsmItem, forceVal?: boolean) => {
+  const ancestorLocked = isItemLocked(group.id) && !group.isLocked;
+  if (ancestorLocked) {
+    Logger.warn(`[Store/Lock] グループ「${group.name}」は祖先グループがロック中のため、ロック状態を変更できません。`);
+    return;
+  }
+  state.selectedProfileName = "";
+  if (forceVal !== undefined) {
+    group.isLocked = forceVal;
+  } else {
+    group.isLocked = !group.isLocked;
+  }
+  await savePrompts();
+};
+
+/**
+ * グループの非表示状態をトグルする (グループ非表示機能)
+ * ロック中のグループは変更できない (他のグループ設定変更と同様の扱い)
+ */
+export const toggleGroupHidden = async (group: PsmItem, forceVal?: boolean) => {
+  if (isItemLocked(group.id)) return;
+  state.selectedProfileName = "";
+  if (forceVal !== undefined) {
+    group.isHidden = forceVal;
+  } else {
+    group.isHidden = !group.isHidden;
+  }
+  await savePrompts();
+};
+
+/**
  * アイテムを複製し、元のアイテムのすぐ下に追加する
  * クリップボードを経由せず即座に反映されます。
  */
 export const duplicateItem = async (item: PsmItem, parentChildren: PsmItem[]) => {
+  if (isItemLocked(item.id)) return;
   state.selectedProfileName = "";
   const idx = parentChildren.indexOf(item);
   if (idx === -1) return;
@@ -169,6 +249,7 @@ export const duplicateItem = async (item: PsmItem, parentChildren: PsmItem[]) =>
  * @param parentList 親リスト（削除後のリスト更新に用いる）
  */
 export const startDeleteConfirm = (item: PsmItem, parentList?: PsmItem[]) => {
+  if (isItemLocked(item.id)) return;
   state.deletingItem = JSON.parse(JSON.stringify(item));
   state.deleteTargetParent = parentList || null;
   state.isDeleteConfirmMode = true; // Still keeping for backward compat if needed, but mainly using isDeleting
@@ -193,6 +274,7 @@ export const cancelDelete = () => {
  * @param atIndex 指定がある場合、そのインデックスに挿入。省略時は末尾に追加。
  */
 export const addItem = (list: PsmItem[], is_group: boolean, atIndex?: number) => {
+  if (isListLocked(list)) return;
   const newItem: PsmItem = {
     id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
     name: "",
@@ -214,6 +296,7 @@ export const addItem = (list: PsmItem[], is_group: boolean, atIndex?: number) =>
  * @param item 編集対象のアイテム
  */
 export const startEdit = (item: PsmItem) => {
+  if (isItemLocked(item.id)) return;
   state.isDeleteConfirmMode = false;
   state.isNewItem = !item.name && !item.content;
   state.editingItem = JSON.parse(JSON.stringify(item));
@@ -226,6 +309,7 @@ export const startEdit = (item: PsmItem) => {
  */
 export const finishEdit = async () => {
   if (!state.editingItem) return;
+  if (isItemLocked(state.editingItem.id)) return;
   state.selectedProfileName = "";
   try {
     const updateTree = (nodes: PsmItem[]) => {
@@ -282,6 +366,7 @@ export const cancelEdit = () => {
  * @param mode "all": アイテムごと削除, "only": グループ枠のみ削除し子は親に昇格
  */
 export const deleteItemFromTree = async (item: PsmItem, mode: "all" | "only") => {
+  if (isItemLocked(item.id)) return;
   state.selectedProfileName = "";
   const findAndRemove = (list: PsmItem[]): boolean => {
     // Use loose equality just in case of type drift
@@ -318,6 +403,7 @@ export const deleteItemFromTree = async (item: PsmItem, mode: "all" | "only") =>
 
 // グループの有効無効切り替え（子要素自体のenabledは変更せず、親の状態が計算プロパティで反映される）
 export const toggleGroupEnabled = async (group: PsmItem) => {
+  if (isItemLocked(group.id)) return;
   state.selectedProfileName = "";
   group.enabled = !group.enabled;
   await savePrompts();
@@ -328,6 +414,7 @@ export const toggleGroupEnabled = async (group: PsmItem) => {
  * 親グループが排他選択（isExclusive）の場合は、他の兄弟要素をすべて無効化する
  */
 export const toggleItemEnabled = async (item: PsmItem, parentChildren: PsmItem[], parentGroup?: PsmItem) => {
+  if (isItemLocked(item.id)) return;
   state.selectedProfileName = "";
   item.enabled = !item.enabled;
   
@@ -347,6 +434,7 @@ export const toggleItemEnabled = async (item: PsmItem, parentChildren: PsmItem[]
  * ONにされた場合、すでに複数有効なものがあれば最初の1つだけを残して無効化する
  */
 export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) => {
+  if (isItemLocked(group.id)) return;
   state.selectedProfileName = "";
   if (forceVal !== undefined) {
     group.isExclusive = forceVal;
@@ -373,6 +461,7 @@ export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) =
  * プロンプトアイテムの重み（weight）を 1.0 にリセットする
  */
 export const resetWeight = async (item: PsmItem) => {
+  if (isItemLocked(item.id)) return;
   state.selectedProfileName = "";
   item.weight = 1.0;
   await savePrompts();
@@ -591,6 +680,7 @@ export const deleteGenerationProfile = async (name: string) => {
  * @param enabled true: 有効化, false: 無効化
  */
 export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) => {
+  if (isItemLocked(group.id)) return;
   state.selectedProfileName = "";
   if (!group.children) return;
   const walk = (nodes: PsmItem[]) => {
@@ -871,6 +961,7 @@ export const loadSettingsLocal = () => {
       if (data.toggle_shortcut) state.toggleShortcut = data.toggle_shortcut;
       if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
       if (data.show_weight_slider !== undefined) state.showWeightSlider = data.show_weight_slider;
+      if (data.show_hidden_groups !== undefined) state.showHiddenGroups = data.show_hidden_groups;
       if (Array.isArray(data.recent_move_targets)) {
         state.recentMoveTargets = data.recent_move_targets.slice(0, RECENT_MOVE_LIMIT);
       }
@@ -889,6 +980,7 @@ export const saveSettingsLocal = () => {
     toggle_shortcut: state.toggleShortcut,
     duplicate_check_mode: state.duplicateCheckMode,
     show_weight_slider: state.showWeightSlider,
+    show_hidden_groups: state.showHiddenGroups,
     recent_move_targets: state.recentMoveTargets,
   };
   localStorage.setItem(LS_KEY, JSON.stringify(data));
@@ -1186,6 +1278,15 @@ export const saveConfig = async (dir: string) => {
  */
 export const toggleSidebar = async () => {
   state.isSidebarOpen = !state.isSidebarOpen;
+  saveSettingsLocal();
+};
+
+/**
+ * 「非表示グループの表示」設定をトグルし、即時保存する
+ * Positive/Negative両ペインで共有されるグローバル設定
+ */
+export const toggleShowHiddenGroups = () => {
+  state.showHiddenGroups = !state.showHiddenGroups;
   saveSettingsLocal();
 };
 
@@ -1579,6 +1680,7 @@ export const resolveSubcategories = async (
  */
 export const subdivideGroup = async (group: PsmItem, useAI = false): Promise<number> => {
   if (!group.is_group || !group.children?.length) return 0;
+  if (isItemLocked(group.id)) return 0;
 
   const isSpecial = (c: string) =>
     /^<.+>$/.test(c) || /^__.+__$/.test(c) || /^break$/i.test(c);
@@ -2140,7 +2242,7 @@ export const bulkAssignCategories = async (): Promise<{ applied: number; skipped
   startLoading("detectingCategories");
   try {
     for (const g of roots) {
-      if (g.category) {
+      if (g.category || isItemLocked(g.id)) {
         skipped++;
         continue;
       }
@@ -2211,20 +2313,22 @@ export const collectMoveTargets = (
     { id: "root-neg", name: rootLabels.negative, path: rootLabels.negative, list: state.negative, level: 0 },
   ];
 
-  const collect = (nodes: PsmItem[], level: number, parentPath: string) => {
+  const collect = (nodes: PsmItem[], level: number, parentPath: string, lockedAncestor: boolean) => {
     for (const node of nodes) {
       if (!node || node.id === item.id) continue; // 自分自身とその子孫は除外
       if (node.is_group) {
+        const nodeLocked = lockedAncestor || !!node.isLocked;
+        if (nodeLocked) continue; // ロック中グループとその配下は移動先候補から除外
         const name = node.name || "(No Name)";
         const path = `${parentPath} > ${name}`;
         targets.push({ id: node.id, name, path, list: node.children || [], level });
-        if (node.children) collect(node.children, level + 1, path);
+        if (node.children) collect(node.children, level + 1, path, nodeLocked);
       }
     }
   };
 
-  collect(state.positive, 0, rootLabels.positive);
-  collect(state.negative, 0, rootLabels.negative);
+  collect(state.positive, 0, rootLabels.positive, false);
+  collect(state.negative, 0, rootLabels.negative, false);
   return targets;
 };
 
@@ -2240,6 +2344,7 @@ export const pushRecentMoveTarget = (target: MoveTarget) => {
 
 /** 移動ダイアログを開く */
 export const openMoveDialog = (item: PsmItem) => {
+  if (isItemLocked(item.id)) return;
   state.moveDialogItem = item;
   state.isMoveDialogOpen = true;
 };
@@ -2254,6 +2359,7 @@ export const closeMoveDialog = () => {
 export const executeMoveTo = async (target: MoveTarget) => {
   const item = state.moveDialogItem;
   if (!item) return;
+  if (isItemLocked(item.id) || isListLocked(target.list)) return;
   pushRecentMoveTarget(target);
   closeMoveDialog();
   await teleportItem(item, target.list, "move-dialog");
@@ -2265,8 +2371,10 @@ export const executeMoveTo = async (target: MoveTarget) => {
 
 /** ドラッグ開始: 対象アイテムと元のリストを記録する */
 export const beginDrag = (list: PsmItem[], index?: number) => {
+  const item = typeof index === "number" ? list[index] : null;
+  if (item && isItemLocked(item.id)) return;
   state.isDragging = true;
-  state.draggedItem = typeof index === "number" ? list[index] : null;
+  state.draggedItem = item;
   state.draggedFromList = list;
 };
 
@@ -2292,6 +2400,14 @@ export const finalizeCrossListMove = (destList: PsmItem[]): boolean => {
   const src = state.draggedFromList;
   const item = state.draggedItem;
   if (!src || !item || src === destList) return false;
+
+  // ロック中のアイテム、またはロック中グループへのドロップは取り消す
+  if (isItemLocked(item.id) || isListLocked(destList)) {
+    const dup = destList.findIndex((n) => n && n.id === item.id);
+    if (dup !== -1) destList.splice(dup, 1);
+    Logger.warn("[Store/Drag] ロック中のため、移動を取り消しました。");
+    return false;
+  }
 
   // 自分自身の配下への移動は循環参照になるため、追加を取り消す
   if (isDescendantList(item, destList)) {
@@ -2323,6 +2439,7 @@ const isDescendantList = (item: PsmItem, list: PsmItem[]): boolean => {
 };
 
 export const teleportItem = async (item: PsmItem, dest: PsmItem[], type: string) => {
+  if (isItemLocked(item.id) || isListLocked(dest)) return;
   const walk = (nodes: PsmItem[]): boolean => {
     const idx = nodes.findIndex((n) => n.id === item.id);
     if (idx !== -1) {
