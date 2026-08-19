@@ -2277,6 +2277,43 @@ export const setAllGroupsOpen = (open: boolean) => {
   walk(state.negative);
 };
 
+/**
+ * フィルター機能用: 指定ツリー配下の各グループの開閉状態(isOpen)を
+ * id をキーにしたMapへ保存する (フィルター解除時の復元用)
+ */
+export const snapshotGroupOpenState = (nodes: PsmItem[]): Map<number, boolean> => {
+  const snapshot = new Map<number, boolean>();
+  const walk = (list: PsmItem[]) => {
+    list.forEach((n) => {
+      if (n.is_group) {
+        snapshot.set(n.id, !!n.isOpen);
+        if (n.children) walk(n.children);
+      }
+    });
+  };
+  walk(nodes);
+  return snapshot;
+};
+
+/**
+ * フィルター機能用: snapshotGroupOpenState で保存した開閉状態を復元する
+ * フィルター中に追加/削除されたグループは対象外 (スナップショットに存在するidのみ復元)
+ */
+export const restoreGroupOpenState = (nodes: PsmItem[], snapshot: Map<number, boolean>) => {
+  const walk = (list: PsmItem[]) => {
+    list.forEach((n) => {
+      if (n.is_group) {
+        const saved = snapshot.get(n.id);
+        if (saved !== undefined) {
+          n.isOpen = saved;
+        }
+        if (n.children) walk(n.children);
+      }
+    });
+  };
+  walk(nodes);
+};
+
 
 
 // -------------------------------------------------------------------------

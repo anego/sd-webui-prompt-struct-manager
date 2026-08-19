@@ -4,7 +4,7 @@
  * Positive/Negativeプロンプトのツリーを表示・操作するためのペイン領域です。
  * ヘッダー、開閉機能、およびルートアイテムへの追加ボタンを持ちます。
  */
-import { computed, ref, provide } from "vue";
+import { computed, ref, provide, watch } from "vue";
 import draggable from "vuedraggable";
 import PsmNode from "./PsmNode.vue";
 import { PsmItem } from "../types";
@@ -19,6 +19,8 @@ import {
   endDrag,
   finalizeCrossListMove,
   toggleShowHiddenGroups,
+  snapshotGroupOpenState,
+  restoreGroupOpenState,
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
 import { useI18n } from "../composables/useI18n";
@@ -40,6 +42,20 @@ const props = defineProps<{
   /** ペインの開閉状態 (v-model:isOpen) */
   isOpen: boolean;
 }>();
+
+/**
+ * フィルター機能でグループが自動展開された際、解除後に元の開閉状態へ戻すためのスナップショット
+ * フィルター開始(空→非空)時に保存し、解除(非空→空)時に復元する
+ */
+let groupOpenSnapshot: Map<number, boolean> | null = null;
+watch(searchQuery, (newVal, oldVal) => {
+  if (newVal && !oldVal) {
+    groupOpenSnapshot = snapshotGroupOpenState(props.items);
+  } else if (!newVal && oldVal && groupOpenSnapshot) {
+    restoreGroupOpenState(props.items, groupOpenSnapshot);
+    groupOpenSnapshot = null;
+  }
+});
 
 const emit = defineEmits<{
   (e: "update:isOpen", value: boolean): void;

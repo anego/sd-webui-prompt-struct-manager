@@ -115,6 +115,8 @@
 ### 2.5 Mouse Operations
 - **Double-click Edit:** Quickly open the edit mode (modal) by double-clicking on a group or prompt item.
 - **Context Menu:** Right-clicking on an item opens a context menu for advanced operations (Duplicate, Delete, Move, etc.).
+- **Hover Tooltip:** Hovering over a prompt item shows a tooltip with its name, prompt content, and memo. Only fields that have a value are shown, and each field is separated by a dotted line.
+- **Larger Edit Icon Tap Target:** The edit (pencil) icon on the right of a prompt is now a circular button with an always-visible background, making it easier to click.
 
 ### 2.7 Quick Move-To
 - **Searchable dialog:** "Move to..." in the context menu opens a dialog where destinations can be filtered by typing, so you can reach the right group in a few keystrokes even with many groups (replaces the previous submenu).
@@ -127,6 +129,8 @@
 - **Pane-Independent Filter:** The shared global search filter in the sidebar has been removed, and independent search filters have been added inside the Positive and Negative pane headers.
 - **Pane Collapse Linkage:** The search input field automatically hides when the corresponding pane is clicked and collapsed.
 - **Accidental Trigger Prevention:** Event propagation (bubbling) is prevented for clicks and key inputs inside the filter field, ensuring that typing inside the field does not toggle the pane's open/collapsed state.
+- **Auto-Expand on Match:** When a search term is entered, any group containing a matching item (itself or a descendant) is automatically expanded so the match is always visible.
+- **Open State Restoration:** When the filter is cleared, each group's open/collapsed state is restored to what it was before the filter was applied. Groups that were auto-expanded by the filter no longer stay open afterward.
 
 ## 3. File, Settings & Profiles Management
 

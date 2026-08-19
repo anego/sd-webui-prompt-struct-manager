@@ -2473,3 +2473,80 @@ describe("グループ非表示機能 (Phase 8)", () => {
     expect(state.showHiddenGroups).toBe(true);
   });
 });
+
+// -------------------------------------------------------------------------
+// 16. フィルター機能: グループ開閉状態のスナップショット/復元
+// -------------------------------------------------------------------------
+// 検索フィルターで自動展開されたグループが、フィルター解除後に
+// フィルター適用前の開閉状態へ正しく復元されることを検証する。
+// (PsmTreePane.vue が searchQuery の空<->非空遷移でこれらを呼び出す)
+import { snapshotGroupOpenState, restoreGroupOpenState } from "../src/store";
+
+describe("フィルター機能: グループ開閉状態のスナップショット/復元", () => {
+  const grp = (id: number, name: string, isOpen: boolean, children: PsmItem[] = []): PsmItem => ({
+    id, name, content: "", enabled: true, weight: 1.0, is_group: true, isOpen, children,
+  });
+  const leaf = (id: number, name: string): PsmItem => ({
+    id, name, content: "tag", enabled: true, weight: 1.0, is_group: false,
+  });
+
+  it("16.1 snapshotGroupOpenState: 各グループのisOpen状態をidをキーに記録すること (非グループアイテムは含めない)", () => {
+    // Arrange
+    const tree: PsmItem[] = [
+      grp(1, "閉じたグループ", false, [leaf(2, "leaf")]),
+      grp(3, "開いたグループ", true),
+    ];
+
+    // Act
+    const snapshot = snapshotGroupOpenState(tree);
+
+    // Assert
+    expect(snapshot.get(1)).toBe(false);
+    expect(snapshot.get(3)).toBe(true);
+    expect(snapshot.has(2)).toBe(false); // leaf(非グループ)は対象外
+    expect(snapshot.size).toBe(2);
+  });
+
+  it("16.2 restoreGroupOpenState: フィルターで自動展開(isOpen=true)された後でも、保存済みの状態(false)へ復元すること", () => {
+    // Arrange: フィルター適用前は閉じていた
+    const group = grp(1, "対象グループ", false);
+    const snapshot = snapshotGroupOpenState([group]);
+
+    // Act: フィルター一致による自動展開 (PsmNode.vue の挙動を模擬)
+    group.isOpen = true;
+    // Act: フィルター解除時の復元
+    restoreGroupOpenState([group], snapshot);
+
+    // Assert: フィルター適用前の閉じた状態へ戻ること
+    expect(group.isOpen).toBe(false);
+  });
+
+  it("16.3 restoreGroupOpenState: ネストしたグループ全ての開閉状態を再帰的に復元すること", () => {
+    // Arrange: 親は開いたまま、子は閉じていた状態を保存
+    const child = grp(2, "子グループ", false);
+    const parent = grp(1, "親グループ", true, [child]);
+    const snapshot = snapshotGroupOpenState([parent]);
+
+    // Act: フィルター一致で子も強制展開される
+    child.isOpen = true;
+    restoreGroupOpenState([parent], snapshot);
+
+    // Assert: 親は開いたまま、子は元の閉じた状態へ復元される
+    expect(parent.isOpen).toBe(true);
+    expect(child.isOpen).toBe(false);
+  });
+
+  it("16.4 restoreGroupOpenState: スナップショットに存在しないグループ(フィルター中に新規追加)は変更しないこと", () => {
+    // Arrange: スナップショット後に新しいグループが追加されたケースを模擬
+    const existing = grp(1, "既存グループ", false);
+    const snapshot = snapshotGroupOpenState([existing]);
+    const added = grp(99, "追加されたグループ", true);
+
+    // Act
+    restoreGroupOpenState([existing, added], snapshot);
+
+    // Assert: 追加分はスナップショットにないため isOpen はそのまま
+    expect(existing.isOpen).toBe(false);
+    expect(added.isOpen).toBe(true);
+  });
+});
