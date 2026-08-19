@@ -30,6 +30,7 @@ Quality assurance in PSM Ver2 is built on a 3-layered hierarchical test architec
 - **Duplicate Checking:** Tests mode transitions between `none`, `warn`, and `error` modes.
 - **Loading Control:** Verifies the reactive coordination of `isLoading` and `loadingText` state counters during initial file load operations, ensuring that the spinner does not lock user interactions during daily auto-saving (`savePrompts`) (2 cases).
 - **Compile Formatting (Underscore Replacement):** Assures auto-replacement of underscores with spaces for prompt content, and underscore preservation for Dynamic Prompts wildcards (`__wildcard__`) (1 case added).
+- **Search Filter Group Open-State Snapshot/Restore:** Verifies that each group's open/collapsed state is recorded by `id` when a filter starts, that it is correctly restored (including nested groups) after the filter auto-expands groups and is then cleared, and that groups added while filtering are excluded from restoration (4 cases added).
 
 ### 2.3 E2E Tests (`Playwright` - 12 Cases)
 - **Setup Wizard:** Checks if first-time folder config screen shows and submits successfully.

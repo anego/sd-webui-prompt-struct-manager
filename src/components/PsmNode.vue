@@ -704,71 +704,94 @@ const moveSelf = (dir: 'up' | 'down') => {
 
       <span class="psm-node__break-line"></span>
 
-      <v-icon
+      <v-btn
         v-if="!effectiveLocked"
-        size="16"
-        class="ml-1 flex-shrink-0 psm-node__hover-opacity"
+        icon
+        size="x-small"
+        variant="text"
+        class="ml-1 flex-shrink-0 psm-node__hover-opacity psm-node__edit-btn"
         @click.stop="startEdit(item)"
         :title="t('edit')"
         data-testid="edit-item-btn"
-      >mdi-pencil</v-icon>
+      ><v-icon size="16">mdi-pencil</v-icon></v-btn>
     </div>
 
     <div v-else class="d-inline-flex flex-column align-center ga-0 psm-node__leaf-container">
-      <v-chip
-        :color="chipColor"
-        :variant="isEffectiveEnabled && !isDuplicate ? 'tonal' : 'elevated'"
-        :label="!isDynamicPrompt"
-        size="small"
-        class="ma-0"
-        :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
-        :title="t('doubleClickToEdit')"
-        @click.stop="handleClickLeaf"
-        @dblclick.stop="startEdit(item)"
-        @contextmenu.prevent.stop="
-          openContextMenu?.($event, item, parentChildren)
-        "
-      >
-        <v-icon
-          v-if="!effectiveLocked"
-          start
-          :size="iconSize"
-          class="psm-cursor-grab psm-node__drag-handle flex-shrink-0"
-          >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
-        >
-        <span
-          class="text-truncate flex-shrink-1"
-          style="max-width: 110px"
-          :class="[
-            { 
-              'text-decoration-line-through text-disabled': !isEffectiveEnabled,
-              'font-italic': isDynamicPrompt && isEffectiveEnabled
-            },
-            scaleTextClass
-          ]"
-          data-testid="leaf-label"
-        >
-          {{ item.name || item.memo || item.content }}
-        </span>
-        <!-- Dynamic Prompt Indicator -->
-        <span
-          v-if="item.weight !== 1.0"
-          class="ml-1 text-caption text-orange font-weight-bold flex-shrink-0"
-          >({{ item.weight }})</span
-        >
+      <v-tooltip location="top" :open-delay="400" max-width="320" attach :z-index="20000000">
+        <template #activator="{ props: tooltipProps }">
+          <v-chip
+            v-bind="tooltipProps"
+            :color="chipColor"
+            :variant="isEffectiveEnabled && !isDuplicate ? 'tonal' : 'elevated'"
+            :label="!isDynamicPrompt"
+            size="small"
+            class="ma-0"
+            :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
+            @click.stop="handleClickLeaf"
+            @dblclick.stop="startEdit(item)"
+            @contextmenu.prevent.stop="
+              openContextMenu?.($event, item, parentChildren)
+            "
+          >
+            <v-icon
+              v-if="!effectiveLocked"
+              start
+              :size="iconSize"
+              class="psm-cursor-grab psm-node__drag-handle flex-shrink-0"
+              >{{ isDynamicPrompt ? 'mdi-auto-fix' : 'mdi-drag-vertical' }}</v-icon
+            >
+            <span
+              class="text-truncate flex-shrink-1"
+              style="max-width: 110px"
+              :class="[
+                {
+                  'text-decoration-line-through text-disabled': !isEffectiveEnabled,
+                  'font-italic': isDynamicPrompt && isEffectiveEnabled
+                },
+                scaleTextClass
+              ]"
+              data-testid="leaf-label"
+            >
+              {{ item.name || item.memo || item.content }}
+            </span>
+            <!-- Dynamic Prompt Indicator -->
+            <span
+              v-if="item.weight !== 1.0"
+              class="ml-1 text-caption text-orange font-weight-bold flex-shrink-0"
+              >({{ item.weight }})</span
+            >
 
-        <v-icon
-          v-if="!effectiveLocked"
-          end
-          :size="iconSize"
-          class="ml-2 psm-node__hover-opacity flex-shrink-0"
-          @click.stop="startEdit(item)"
-          data-testid="edit-item-btn"
-          :title="t('edit')"
-        >
-          mdi-pencil
-        </v-icon>
-      </v-chip>
+            <v-btn
+              v-if="!effectiveLocked"
+              icon
+              size="x-small"
+              variant="text"
+              class="ml-2 psm-node__hover-opacity psm-node__edit-btn flex-shrink-0"
+              @click.stop="startEdit(item)"
+              data-testid="edit-item-btn"
+              :title="t('edit')"
+            >
+              <v-icon :size="iconSize">mdi-pencil</v-icon>
+            </v-btn>
+          </v-chip>
+        </template>
+
+        <div class="psm-node__tooltip-body" data-testid="leaf-tooltip">
+          <div v-if="item.name" class="psm-node__tooltip-row">
+            <div class="psm-node__tooltip-label">{{ t('name') }}</div>
+            <div class="psm-node__tooltip-value">{{ item.name }}</div>
+          </div>
+          <div v-if="item.content" class="psm-node__tooltip-row">
+            <div class="psm-node__tooltip-label">{{ t('promptContent') }}</div>
+            <div class="psm-node__tooltip-value">{{ item.content }}</div>
+          </div>
+          <div v-if="item.memo" class="psm-node__tooltip-row">
+            <div class="psm-node__tooltip-label">{{ t('memo') }}</div>
+            <div class="psm-node__tooltip-value">{{ item.memo }}</div>
+          </div>
+          <div class="psm-node__tooltip-hint">{{ t('doubleClickToEdit') }}</div>
+        </div>
+      </v-tooltip>
 
       <!-- Inline weight slider (Under the chip) -->
       <div 
@@ -820,12 +843,25 @@ const moveSelf = (dir: 'up' | 'down') => {
 }
 
 div.psm-node {
-  i.psm-node__hover-opacity {
+  i.psm-node__hover-opacity,
+  .v-btn.psm-node__hover-opacity {
     opacity: 0.6 !important; /* デフォルトで常時表示して見落としを防ぐ */
     transition: all 0.2s;
     &:hover {
       opacity: 1 !important;
       color: #ff5722 !important; /* テーマのオレンジカラー */
+    }
+  }
+
+  /* 鉛筆アイコンをクリックしやすいよう常時見える円形の背景付きタップ領域に */
+  .psm-node__edit-btn {
+    width: 22px !important;
+    height: 22px !important;
+    background-color: rgba(255, 255, 255, 0.22) !important;
+    border-radius: 50% !important;
+
+    &:hover {
+      background-color: rgba(255, 87, 34, 0.25) !important; /* テーマのオレンジカラーを薄く */
     }
   }
 
@@ -1075,5 +1111,52 @@ div.psm-node {
 
 :deep(.v-selection-control__input i) {
   font-size: $font-size-icon;
+}
+
+/* プロンプトホバー時のツールチップ
+   (Vuetifyの v-tooltip 本体が .v-overlay__content を display:inline-block で描画するため、
+    中の行が確実にブロック化・左寄せされるよう明示的に指定する) */
+.psm-node__tooltip-body {
+  display: block !important;
+  text-align: left !important;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.psm-node__tooltip-row {
+  display: block !important;
+  text-align: left !important;
+
+  /* 直前の行が実在する(v-ifで描画された)場合のみ区切り線を入れるため、
+     隣接セレクタで指定する。メモ等が無い場合は要素自体が存在しないため、
+     余分な区切りや空白は発生しない */
+  & + & {
+    margin-top: $spacing-sm !important;
+    padding-top: $spacing-sm !important;
+    border-top: 2px dotted rgba(255, 255, 255, 0.5) !important;
+  }
+}
+
+.psm-node__tooltip-label {
+  display: block !important;
+  text-align: left !important;
+  font-weight: bold;
+  font-size: $font-size-xs;
+  /* ツールチップ本体の背景は明暗どちらの場合もあるため、固定色ではなく
+     実際の文字色を継承したうえで不透明度だけ落とし、常に視認できるようにする */
+  color: inherit;
+  opacity: 0.75;
+}
+
+.psm-node__tooltip-value {
+  display: block !important;
+  text-align: left !important;
+}
+
+.psm-node__tooltip-hint {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: inherit;
+  opacity: 0.75;
 }
 </style>
