@@ -132,12 +132,18 @@
 - **Auto-Expand on Match:** When a search term is entered, any group containing a matching item (itself or a descendant) is automatically expanded so the match is always visible.
 - **Open State Restoration:** When the filter is cleared, each group's open/collapsed state is restored to what it was before the filter was applied. Groups that were auto-expanded by the filter no longer stay open afterward.
 
+### 2.8 Bulk-Disable Pane
+- **Overview:** A button in each pane header (Positive / Negative) lets you disable every currently-enabled prompt in that pane at once.
+- **Locking:** Locked groups and items (including those locked via an ancestor group) are excluded and remain enabled.
+
 ## 3. File, Settings & Profiles Management
 
-### 3.1 YAML Persistence
-- Prompt data is saved in YAML format in a local directory.
-- **Multi-file Management:** Create multiple YAML files for different purposes and switch between them via a dropdown.
-- **File Operations:** Create New, Duplicate, Rename, Delete.
+### 3.1 Prompt File Persistence (YAML / JSON)
+- Prompt data is saved in either YAML or JSON format in a local directory. Newly created files default to JSON, which parses and saves faster than YAML. Existing YAML files remain fully readable and writable — compatibility is preserved.
+- **Multi-file Management:** Create multiple files (.yaml / .json can coexist) for different purposes and switch between them via a dropdown.
+- **File Operations:** Create New, Duplicate, Rename, Delete. When duplicating or renaming without specifying an extension, the source file's format (.yaml or .json) is automatically carried over.
+- **YAML→JSON Conversion:** The "Convert to JSON" button in the sidebar (enabled only when a .yaml file is selected) converts an existing YAML file into a JSON file with the same content. The original YAML file is left untouched, so it also serves as a backup.
+- **Faster Saving (write cache):** Instead of reading and rewriting the entire file on every save, changes are applied instantly to an in-memory cache on the server, and the actual disk write is batched roughly 1.5 seconds after activity settles. This keeps checkbox toggles and slider drags responsive even for large files. Any pending write is flushed to disk before the browser tab closes or reloads.
 
 ### 3.2 PNG Info (infotext) Import
 - **Overview:** Use the image icon in the toolbar to paste a generation parameters string (the contents of the PNG Info tab) and import it as a structured prompt tree.

@@ -31,7 +31,7 @@ sys.modules["modules.script_callbacks"] = mock_script_callbacks
 
 # モックを注入した後に scripts.psm_extension を安全にインポートします
 from scripts import psm_extension
-from scripts.psm import config
+from scripts.psm import cache, config
 
 @pytest.fixture
 def temp_extension_env(tmp_path: Path) -> Generator[Path, None, None]:
@@ -52,12 +52,18 @@ def temp_extension_env(tmp_path: Path) -> Generator[Path, None, None]:
     if hasattr(mock_shared.opts, "psm_save_dir"):
         del mock_shared.opts.psm_save_dir
 
+    # cache モジュールはプロセス存続期間中生き続けるモジュールレベル状態を持つため、
+    # テスト間の汚染 (前のテストの保留中flushタスクなど) を防ぐためリセットする
+    cache._reset_for_test()
+
     yield tmp_path
 
     # テスト終了後に元の状態へクリーンアップ
     config.EXTENSION_DIR = original_extension_dir
     config.DEFAULT_DIR = original_default_dir
-    
+
     if hasattr(mock_shared.opts, "psm_save_dir"):
         del mock_shared.opts.psm_save_dir
+
+    cache._reset_for_test()
 

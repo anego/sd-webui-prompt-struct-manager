@@ -85,6 +85,7 @@ export const en = {
   showHiddenGroups: "Show Hidden Groups",
   hideGroupAction: "Hide",
   showGroupAction: "Unhide",
+  disableAllInPane: "Disable All Enabled Prompts in This Pane",
 
   enableAll: "Enable All in Group",
   disableAll: "Disable All in Group",
@@ -113,9 +114,12 @@ export const en = {
   importData: "Import from WebUI",
   copySource: "Source File",
   currentFile: "Current File",
-  newFileName: "New File Name (.yaml)",
+  newFileName: "New File Name",
   overwriteCurrent: "Overwrite Current File",
   createAndSave: "Create and Save",
+  convertToJson: "Convert to JSON (faster)",
+  convertToJsonSuccess: "Converted to a JSON file successfully.",
+  convertToJsonFailed: "Failed to convert to JSON.",
   
   // Edit Modal
   editGroup: "Edit Group",

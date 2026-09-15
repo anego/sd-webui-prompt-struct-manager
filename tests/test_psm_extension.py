@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 # conftest.py で sys.modules へのモック注入が完了しているため安全にインポート可能
 from scripts import psm_extension
-from scripts.psm import config
+from scripts.psm import cache, config
 from modules import shared
 
 # -------------------------------------------------------------------------
@@ -524,6 +524,11 @@ def test_save_prompts_preserves_unknown_keys(test_client: TestClient, temp_exten
     })
     assert save_response.status_code == 200
 
+    # 保存はキャッシュへのデバウンス書き込みのため、ディスク上のファイルを
+    # 直接検証する前に明示的にflushさせる
+    flush_response = test_client.post("/psm/flush-prompts", json={"file": "future.yaml"})
+    assert flush_response.status_code == 200
+
     # Assert: ファイル内に未知キーが残っていること
     with future_file.open("r", encoding="utf-8") as f:
         saved = yaml.safe_load(f)
@@ -629,3 +634,305 @@ def test_generation_profiles_stored_separately_from_prompt_yaml(test_client: Tes
 
     # Assert: プロンプトYAML側は変化しない
     assert get_response.json()["positive"] == [{"id": 1, "text": "1girl"}]
+
+# -------------------------------------------------------------------------
+# 保存高速化 (書き込みキャッシュ/デバウンスflush) のテスト
+# -------------------------------------------------------------------------
+
+def test_save_prompts_does_not_write_disk_immediately(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    /psm/save-prompts はディスクへの書き込みをデバウンスするため、
+    レスポンスが返った直後の時点ではまだファイルへ反映されていないことを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    target_path: str = os.path.join(save_dir, "debounced.yaml")
+
+    # Act
+    save_response = test_client.post("/psm/save-prompts", json={
+        "file": "debounced.yaml",
+        "positive": [{"id": 1, "text": "1girl"}],
+        "negative": [],
+    })
+
+    # Assert: 応答は成功するが、ディスク上のファイルはまだ作成されていない
+    assert save_response.status_code == 200
+    assert save_response.json() == {"status": "success"}
+    assert not os.path.exists(target_path)
+
+def test_save_prompts_flush_prompts_endpoint_writes_disk(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    /psm/flush-prompts を呼ぶと、保留中のキャッシュ内容が即座にディスクへ書き込まれることを検証します。
+    (ブラウザタブを閉じる直前の beforeunload + sendBeacon から使われる想定のエンドポイント)
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    target_path: str = os.path.join(save_dir, "flush_me.yaml")
+    test_client.post("/psm/save-prompts", json={
+        "file": "flush_me.yaml",
+        "positive": [{"id": 1, "text": "1girl"}],
+        "negative": [],
+    })
+    assert not os.path.exists(target_path)  # 前提: まだ書き込まれていない
+
+    # Act
+    flush_response = test_client.post("/psm/flush-prompts", json={"file": "flush_me.yaml"})
+
+    # Assert
+    assert flush_response.status_code == 200
+    assert flush_response.json() == {"status": "success"}
+    assert os.path.exists(target_path)
+    with open(target_path, "r", encoding="utf-8") as f:
+        saved = yaml.safe_load(f)
+    assert saved["positive"] == [{"id": 1, "text": "1girl"}]
+
+def test_get_prompts_reads_own_pending_write_from_cache(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    save-prompts 直後、ディスクへのflush前であっても /psm/get-prompts は
+    キャッシュ経由で最新の内容を返すこと (read-your-own-writes) を検証します。
+    """
+    # Act
+    test_client.post("/psm/save-prompts", json={
+        "file": "readback.yaml",
+        "positive": [{"id": 1, "text": "1girl"}],
+        "negative": [],
+    })
+    get_response = test_client.get("/psm/get-prompts?file=readback.yaml")
+
+    # Assert
+    assert get_response.json()["positive"] == [{"id": 1, "text": "1girl"}]
+
+def test_duplicate_file_copies_pending_unflushed_changes(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    複製元ファイルに保留中(未flush)のキャッシュ変更がある場合でも、
+    複製先には最新の内容がコピーされることを検証します (古い内容のコピー事故を防止)。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    src_file: str = "src_pending.yaml"
+    with open(os.path.join(save_dir, src_file), "w", encoding="utf-8") as f:
+        yaml.dump({"positive": ["old"]}, f)
+
+    # 保存はするがまだディスクへflushしない (キャッシュ上にのみ最新値がある状態)
+    test_client.post("/psm/save-prompts", json={
+        "file": src_file,
+        "positive": ["new"],
+        "negative": [],
+    })
+
+    # Act
+    response = test_client.post("/psm/duplicate-file", json={"src": src_file, "dst": "copy_pending.yaml"})
+
+    # Assert: 複製先には古い内容ではなく最新の内容が反映されている
+    assert response.status_code == 200
+    with open(os.path.join(save_dir, "copy_pending.yaml"), "r", encoding="utf-8") as f:
+        copied = yaml.safe_load(f)
+    assert copied["positive"] == ["new"]
+
+def test_delete_file_pending_save_does_not_resurrect_file(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    ファイル作成直後(まだディスクへflushされていない)に削除しても、
+    保留中だったflushタスクが後からファイルを復活させないことを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    target_path: str = os.path.join(save_dir, "created_then_deleted.yaml")
+    test_client.post("/psm/save-prompts", json={
+        "file": "created_then_deleted.yaml",
+        "positive": [{"id": 1, "text": "1girl"}],
+        "negative": [],
+    })
+    assert not os.path.exists(target_path)  # 前提: まだディスクには存在しない
+
+    # Act
+    delete_response = test_client.delete("/psm/delete-file?file=created_then_deleted.yaml")
+
+    # Assert: 削除は「ファイルが無い」ため失敗するが、以降も一切ファイルは作成されない
+    assert delete_response.status_code == 200
+    assert cache.get(Path(target_path).resolve()) is None
+    assert not os.path.exists(target_path)
+
+def test_shutdown_event_flushes_all_pending_caches(test_app: FastAPI, temp_extension_env: Path) -> None:
+    """
+    FastAPIのシャットダウンイベントで、保留中のキャッシュ変更が
+    すべてディスクへ書き込まれることを検証します (WebUI通常終了・再起動時の保護)。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    target_path: str = os.path.join(save_dir, "shutdown_test.yaml")
+
+    with TestClient(test_app) as client:
+        client.post("/psm/save-prompts", json={
+            "file": "shutdown_test.yaml",
+            "positive": [{"id": 1, "text": "1girl"}],
+            "negative": [],
+        })
+        # with ブロックを抜ける際に shutdown イベントが発火する
+        assert not os.path.exists(target_path)
+
+    # Assert: shutdownイベントの発火後はディスクへ書き込まれている
+    assert os.path.exists(target_path)
+
+# -------------------------------------------------------------------------
+# 保存高速化フェーズC: YAML→JSON移行 のテスト
+# -------------------------------------------------------------------------
+
+def test_save_and_get_prompts_json_format(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    .json ファイルへの保存・取得が YAML と同様に正しく行えることを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    prompt_payload: Dict[str, object] = {
+        "file": "test_prompt.json",
+        "positive": [{"id": 1, "text": "masterpiece"}],
+        "negative": [{"id": 2, "text": "low quality"}],
+    }
+
+    # Act: 保存してflush
+    test_client.post("/psm/save-prompts", json=prompt_payload)
+    test_client.post("/psm/flush-prompts", json={"file": "test_prompt.json"})
+
+    # Assert: ディスク上に実際にJSON形式で書き込まれていること
+    target_path = os.path.join(save_dir, "test_prompt.json")
+    assert os.path.exists(target_path)
+    with open(target_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["positive"] == prompt_payload["positive"]
+
+    # Assert: get-prompts でも正しく取得できること
+    get_response = test_client.get("/psm/get-prompts?file=test_prompt.json")
+    assert get_response.json()["positive"] == prompt_payload["positive"]
+
+def test_list_files_includes_both_yaml_and_json(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    /psm/list-files が .yaml と .json の両方を対象に含み、
+    generation_profiles.json は除外することを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "old.yaml"), "w", encoding="utf-8") as f:
+        f.write("positive: []\n")
+    with open(os.path.join(save_dir, "new.json"), "w", encoding="utf-8") as f:
+        json.dump({"positive": []}, f)
+    test_client.post("/psm/generation-profiles", json={"profiles": []})
+
+    # Act
+    response = test_client.get("/psm/list-files")
+
+    # Assert
+    assert response.json() == {"files": ["new.json", "old.yaml"]}
+
+def test_convert_to_json_creates_json_and_keeps_original_yaml(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    /psm/convert-to-json が既存の .yaml と同内容の .json を新規作成し、
+    元の .yaml ファイルはそのまま残すことを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    src_path = os.path.join(save_dir, "legacy.yaml")
+    with open(src_path, "w", encoding="utf-8") as f:
+        yaml.dump({"positive": [{"id": 1, "text": "1girl"}], "negative": []}, f)
+
+    # Act
+    response = test_client.post("/psm/convert-to-json", json={"src": "legacy.yaml"})
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "file": "legacy.json"}
+
+    # 元のYAMLファイルは変更されずそのまま残る
+    assert os.path.exists(src_path)
+
+    # 新しいJSONファイルが同内容で作成されている
+    dst_path = os.path.join(save_dir, "legacy.json")
+    assert os.path.exists(dst_path)
+    with open(dst_path, "r", encoding="utf-8") as f:
+        converted = json.load(f)
+    assert converted["positive"] == [{"id": 1, "text": "1girl"}]
+
+def test_convert_to_json_reflects_unflushed_pending_changes(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    変換元に保留中(未flush)のキャッシュ変更がある場合でも、
+    変換結果には最新の内容が反映されることを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "pending.yaml"), "w", encoding="utf-8") as f:
+        yaml.dump({"positive": ["old"]}, f)
+
+    # 保存はするがまだディスクへflushしない
+    test_client.post("/psm/save-prompts", json={
+        "file": "pending.yaml",
+        "positive": ["new"],
+        "negative": [],
+    })
+
+    # Act
+    response = test_client.post("/psm/convert-to-json", json={"src": "pending.yaml"})
+
+    # Assert
+    assert response.status_code == 200
+    with open(os.path.join(save_dir, "pending.json"), "r", encoding="utf-8") as f:
+        converted = json.load(f)
+    assert converted["positive"] == ["new"]
+
+def test_convert_to_json_rejects_non_yaml_source(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    変換元が .yaml でない場合はエラーを返すことを検証します。
+    """
+    # Act
+    response = test_client.post("/psm/convert-to-json", json={"src": "already.json"})
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+
+def test_convert_to_json_refuses_to_overwrite_existing_destination(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    変換先の .json が既に存在する場合は上書きせずエラーを返すことを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "dup.yaml"), "w", encoding="utf-8") as f:
+        yaml.dump({"positive": []}, f)
+    with open(os.path.join(save_dir, "dup.json"), "w", encoding="utf-8") as f:
+        json.dump({"positive": ["existing"]}, f)
+
+    # Act
+    response = test_client.post("/psm/convert-to-json", json={"src": "dup.yaml"})
+
+    # Assert: 既存のJSONは上書きされない
+    assert response.json()["status"] == "error"
+    with open(os.path.join(save_dir, "dup.json"), "r", encoding="utf-8") as f:
+        untouched = json.load(f)
+    assert untouched["positive"] == ["existing"]
+
+def test_duplicate_file_defaults_to_source_extension_when_dst_has_none(test_client: TestClient, temp_extension_env: Path) -> None:
+    """
+    複製先の拡張子が省略された場合、.yaml固定ではなく複製元と同じ拡張子
+    (.json) が補完されることを検証します。
+    """
+    # Arrange
+    save_dir: str = str(config.get_psm_dir())
+    os.makedirs(save_dir, exist_ok=True)
+    with open(os.path.join(save_dir, "src.json"), "w", encoding="utf-8") as f:
+        json.dump({"positive": ["x"]}, f)
+
+    # Act
+    response = test_client.post("/psm/duplicate-file", json={"src": "src.json", "dst": "copy_no_ext"})
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    assert os.path.exists(os.path.join(save_dir, "copy_no_ext.json"))
+    assert not os.path.exists(os.path.join(save_dir, "copy_no_ext.yaml"))

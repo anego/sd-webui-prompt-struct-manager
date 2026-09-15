@@ -21,9 +21,9 @@ export const state = reactive({
   positive: [] as PsmItem[],
   /** Negativeプロンプトのツリーデータ */
   negative: [] as PsmItem[],
-  /** 検出されたYAMLファイル一覧 */
-  yamlFiles: [] as string[],
-  /** 現在選択中のYAMLファイル名 */
+  /** 検出されたプロンプトファイル一覧 (.yaml / .json) */
+  promptFiles: [] as string[],
+  /** 現在選択中のプロンプトファイル名 */
   selectedFile: "",
 
   /** 設定保存ディレクトリパス */
@@ -698,6 +698,27 @@ export const setGroupChildrenEnabled = async (group: PsmItem, enabled: boolean) 
 };
 
 /**
+ * ペイン（Positive/Negative）ルート直下から子孫まで、すべてのアイテムの enabled を一括で無効化する
+ * ロックされているアイテム（祖先ロック含む）は対象外とする
+ */
+export const disableAllInPane = async (items: PsmItem[]) => {
+  state.selectedProfileName = "";
+  const walk = (nodes: PsmItem[]) => {
+    for (const node of nodes) {
+      if (!node) continue;
+      if (!isItemLocked(node.id)) {
+        node.enabled = false;
+      }
+      if (node.is_group && node.children) {
+        walk(node.children);
+      }
+    }
+  };
+  walk(items);
+  await savePrompts();
+};
+
+/**
  * ローディング表示を開始するヘルパー関数
  */
 export const startLoading = (textKey: string) => {
@@ -730,19 +751,19 @@ export const listFiles = async () => {
     const res = await fetch("/psm/list-files");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    state.yamlFiles = data.files;
-    
+    state.promptFiles = data.files;
+
     // last_fileがあればそれを選択
     if (!state.selectedFile) {
-       if (state.lastFile && state.yamlFiles.includes(state.lastFile)) {
+       if (state.lastFile && state.promptFiles.includes(state.lastFile)) {
          state.selectedFile = state.lastFile;
          await loadPrompts();
        }
        // Fallback removed to allow unselected state on directory change
     }
-    Logger.debug("[Store/Data] サーバーから取得したYAMLファイルの一覧を読み込みました。", state.yamlFiles);
+    Logger.debug("[Store/Data] サーバーから取得したプロンプトファイルの一覧を読み込みました。", state.promptFiles);
   } catch (e) {
-    Logger.error("[Store/Data] サーバーからのYAMLファイル一覧取得処理に失敗しました。", e);
+    Logger.error("[Store/Data] サーバーからのプロンプトファイル一覧取得処理に失敗しました。", e);
   } finally {
     stopLoading();
   }
@@ -814,6 +835,24 @@ export const savePrompts = async () => {
 };
 
 /**
+ * タブを閉じる/リロードする直前に、サーバー側でデバウンス待ちになっている
+ * ディスク書き込み(save-prompts のキャッシュflush)を確実に実行させる。
+ * ページ離脱中は通常の fetch が中断される可能性があるため、
+ * ブラウザが離脱処理をブロックせずに送信を保証する sendBeacon を使う。
+ */
+export const flushPromptsOnUnload = () => {
+  if (!state.selectedFile) return;
+  try {
+    const blob = new Blob([JSON.stringify({ file: state.selectedFile })], {
+      type: "application/json",
+    });
+    navigator.sendBeacon("/psm/flush-prompts", blob);
+  } catch (e) {
+    Logger.error("[Store/Data] ページ離脱時のプロンプト保存flushに失敗しました。", e);
+  }
+};
+
+/**
  * Anima向けの初期テンプレートツリーを生成する (Phase 3)
  * カテゴリ設定済みのグループ雛形と、Anima公式推奨の品質タグ/ネガティブを含む
  */
@@ -849,14 +888,26 @@ export const buildAnimaTemplate = (): { positive: PsmItem[]; negative: PsmItem[]
 };
 
 /**
- * 新しいYAMLファイルを作成し、それを選択状態にする
- * @param name ファイル名 (拡張子なしでも可)
+ * 拡張子省略時に既定の拡張子を補うヘルパー。
+ * referenceFile が指定されていればその拡張子(.yaml/.json)を継承する
+ * (複製・リネーム先の形式を、複製・リネーム元と同じ形式に揃えるため)。
+ * referenceFile が無い場合 (新規作成) は、YAMLよりパース/保存が高速な .json を既定形式とする。
+ */
+const withPromptFileExtension = (name: string, referenceFile?: string): string => {
+  if (name.endsWith(".yaml") || name.endsWith(".json")) return name;
+  const ext = referenceFile?.endsWith(".yaml") ? ".yaml" : ".json";
+  return `${name}${ext}`;
+};
+
+/**
+ * 新しいプロンプトファイルを作成し、それを選択状態にする
+ * @param name ファイル名 (拡張子なしの場合は .json で作成される)
  * @param withAnimaTemplate trueの場合、Animaテンプレート(model_mode: anima + 雛形ツリー)で初期化する
  */
-export const createYamlFile = async (name: string, withAnimaTemplate = false) => {
+export const createPromptFile = async (name: string, withAnimaTemplate = false) => {
   startLoading("saving");
   try {
-    const filename = name.endsWith(".yaml") ? name : `${name}.yaml`;
+    const filename = withPromptFileExtension(name);
     const template = withAnimaTemplate ? buildAnimaTemplate() : { positive: [], negative: [] };
     const payload: Record<string, unknown> = {
       file: filename,
@@ -886,7 +937,7 @@ export const createYamlFile = async (name: string, withAnimaTemplate = false) =>
 export const duplicateCurrentFile = async (n: string) => {
   startLoading("saving");
   try {
-    const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+    const fn = withPromptFileExtension(n, state.selectedFile);
     await fetch("/psm/duplicate-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -907,7 +958,7 @@ export const duplicateCurrentFile = async (n: string) => {
 export const renameCurrentFile = async (n: string) => {
   startLoading("saving");
   try {
-    const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+    const fn = withPromptFileExtension(n, state.selectedFile);
     await fetch("/psm/rename-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -915,6 +966,37 @@ export const renameCurrentFile = async (n: string) => {
     });
     await listFiles();
     state.selectedFile = fn;
+  } finally {
+    stopLoading();
+  }
+};
+
+/**
+ * 現在選択中の .yaml ファイルを、同内容の .json ファイルへ変換する。
+ * 元の .yaml ファイルは変更せずそのまま残る (バックアップとして機能する)。
+ * 変換後は新しく作成された .json ファイルを選択状態にする。
+ */
+export const convertCurrentFileToJson = async (): Promise<{ status: string; message?: string }> => {
+  if (!state.selectedFile || !state.selectedFile.endsWith(".yaml")) {
+    return { status: "error", message: "変換対象は.yamlファイルを選択してください。" };
+  }
+  startLoading("saving");
+  try {
+    const res = await fetch("/psm/convert-to-json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: state.selectedFile }),
+    });
+    const result = await res.json();
+    if (result.status === "success" && result.file) {
+      await listFiles();
+      state.selectedFile = result.file;
+      await loadPrompts();
+    }
+    return result;
+  } catch (e) {
+    Logger.error("[Store/Data] YAMLからJSONへの変換に失敗しました。", e);
+    return { status: "error", message: e instanceof Error ? e.message : String(e) };
   } finally {
     stopLoading();
   }
@@ -1251,7 +1333,7 @@ export const saveConfig = async (dir: string) => {
     state.selectedFile = "";
     state.positive = [];
     state.negative = [];
-    state.yamlFiles = [];
+    state.promptFiles = [];
     state.lastFile = ""; // Clear last file memory
     saveSettingsLocal(); // Persist
 
@@ -1868,7 +1950,7 @@ export const importInfotext = async (
 };
 
 export const createYamlWithData = async (n: string, pos: PsmItem[], neg: PsmItem[]) => {
-  const fn = n.endsWith(".yaml") ? n : `${n}.yaml`;
+  const fn = withPromptFileExtension(n);
   await fetch("/psm/save-prompts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

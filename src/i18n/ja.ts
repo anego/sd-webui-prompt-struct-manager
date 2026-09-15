@@ -86,6 +86,7 @@ export const ja = {
   showHiddenGroups: "非表示グループの表示",
   hideGroupAction: "非表示にする",
   showGroupAction: "再表示する",
+  disableAllInPane: "このペインの有効なプロンプトを一括で無効化",
 
   enableAll: "グループ内すべて有効化",
   disableAll: "グループ内すべて無効化",
@@ -114,9 +115,12 @@ export const ja = {
   importData: "WebUIからインポート",
   copySource: "コピー元",
   currentFile: "現在のファイル",
-  newFileName: "新しいファイル名 (.yaml)",
+  newFileName: "新しいファイル名",
   overwriteCurrent: "現在のファイルに上書き",
   createAndSave: "新規作成して保存",
+  convertToJson: "JSONに変換 (高速化)",
+  convertToJsonSuccess: "JSONファイルへの変換が完了しました。",
+  convertToJsonFailed: "JSONへの変換に失敗しました。",
   
   // Edit Modal
   editGroup: "グループ編集",

@@ -245,6 +245,15 @@ const iconSize = computed(() => {
     default: return "small";
   }
 });
+
+/**
+ * チップは overflow:hidden のため、重み表示 "(1.2)" が付くと
+ * 名前欄と合計した幅が親コンテナの上限を超え、右端の編集アイコンが
+ * 見切れてしまう。重み表示分の幅をあらかじめ差し引いて確保する
+ */
+const leafLabelMaxWidth = computed(() => {
+  return props.item.weight !== 1.0 ? "80px" : "110px";
+});
 const handleClickHeader = () => {
   state.focusedItemId = props.item.id;
   props.item.isOpen = !props.item.isOpen;
@@ -742,7 +751,7 @@ const moveSelf = (dir: 'up' | 'down') => {
             >
             <span
               class="text-truncate flex-shrink-1"
-              style="max-width: 110px"
+              :style="{ maxWidth: leafLabelMaxWidth }"
               :class="[
                 {
                   'text-decoration-line-through text-disabled': !isEffectiveEnabled,
@@ -809,7 +818,7 @@ const moveSelf = (dir: 'up' | 'down') => {
           track-color="grey"
           :disabled="effectiveLocked"
           class="psm-node__weight-slider flex-grow-1"
-          @update:modelValue="savePrompts"
+          @end="savePrompts"
           @click.stop
         ></v-slider>
 

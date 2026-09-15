@@ -6,7 +6,7 @@
 import { ref } from "vue";
 import {
   state,
-  createYamlFile,
+  createPromptFile,
   duplicateCurrentFile,
   renameCurrentFile,
   createYamlWithData,
@@ -43,7 +43,7 @@ const withAnimaTemplate = ref(false);
 const handleCreateFile = async () => {
   const n = names.value.new.trim();
   if (!n) return;
-  await createYamlFile(n, withAnimaTemplate.value);
+  await createPromptFile(n, withAnimaTemplate.value);
   emit("update:newDialog", false);
   names.value.new = "";
   withAnimaTemplate.value = false;
@@ -165,7 +165,7 @@ const executeImport = async (mode: "overwrite" | "new") => {
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn @click="emit('update:renameDialog', false)">{{ t('cancel') }}</v-btn>
-          <v-btn color="primary" @click="handleRenameFileExec">{{ t('execute') }}</v-btn> // "変更" -> "Execute" or "Rename". Dictionary has "rename" as "名前変更"(Noun) or "Rename File". But button "変更" usually "Change" or "Rename". I'll use t('execute') or create 'renameAction'? I have 'rename' in i18n ("名前変更"). I'll use t('rename') (which is "名前変更" but button might be "変更"). "変更" -> "execute"? I added `execute` "実行". `rename` "名前変更". Button says "変更". I will use `execute` or `rename`. Let's use `t('rename')` it might be weird ("名前変更"). I'll use `t('execute')` or leave as is? I'll use `t('execute')` (Run/Execute/Change).
+          <v-btn color="primary" @click="handleRenameFileExec">{{ t('execute') }}</v-btn>
         </v-card-actions>
       </v-card>
     </PsmModal>

@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { 
-  state, 
-  getCompiledPrompts, 
-  detectDuplicates, 
-  savePrompts, 
+import {
+  state,
+  getCompiledPrompts,
+  detectDuplicates,
+  savePrompts,
   loadPrompts,
-  createYamlFile,
+  createPromptFile,
   duplicateCurrentFile,
   renameCurrentFile,
-  deleteCurrentFile
+  deleteCurrentFile,
+  flushPromptsOnUnload
 } from "../src/store";
 import { PsmItem } from "../src/types";
 
@@ -24,6 +25,8 @@ const mockLocalStorage = {
   setItem: vi.fn(),
 };
 
+const mockSendBeacon = vi.fn();
+
 beforeEach(() => {
   // グローバルモックの注入
   vi.stubGlobal("localStorage", mockLocalStorage);
@@ -32,6 +35,7 @@ beforeEach(() => {
     querySelector: vi.fn(),
   });
   vi.stubGlobal("fetch", vi.fn());
+  vi.stubGlobal("navigator", { sendBeacon: mockSendBeacon });
   
   // 各テスト間で状態が干渉しないように Piniaライクな状態オブジェクトをリセットします
   state.positive = [];
@@ -421,23 +425,23 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     }));
   });
 
-  it("3.4 createYamlFile: /psm/save-prompts に対して初期化データをPOSTし、作成後に再読み込みされること", async () => {
+  it("3.4 createPromptFile: /psm/save-prompts に対して初期化データをPOSTし、作成後に再読み込みされること (拡張子省略時は.json)", async () => {
     // Arrange
-    const mockResponse = { ok: true, json: async () => ({ status: "success", files: ["new_file.yaml"] }) };
+    const mockResponse = { ok: true, json: async () => ({ status: "success", files: ["new_file.json"] }) };
     vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
 
     // Act
-    await createYamlFile("new_file");
+    await createPromptFile("new_file");
 
     // Assert
     // 1. ファイルの空保存APIが呼ばれたか
     expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ file: "new_file.yaml", positive: [], negative: [] })
+      body: JSON.stringify({ file: "new_file.json", positive: [], negative: [] })
     }));
 
     // 2. 作成したファイルが選択状態に変更されていること
-    expect(state.selectedFile).toBe("new_file.yaml");
+    expect(state.selectedFile).toBe("new_file.json");
   });
 
   it("3.5 duplicateCurrentFile / renameCurrentFile / deleteCurrentFile: 各操作に対応するAPIが正しいメソッドとパラメータで叩かれること", async () => {
@@ -469,6 +473,120 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     expect(fetch).toHaveBeenCalledWith("/psm/delete-file?file=renamed.yaml", expect.objectContaining({
       method: "DELETE"
     }));
+  });
+
+  it("3.6 duplicateCurrentFile / renameCurrentFile: 拡張子省略時は .yaml 固定ではなく複製・変更元と同じ拡張子を継承すること", async () => {
+    // Arrange: 選択中ファイルが .json のケース
+    state.selectedFile = "current.json";
+    const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await duplicateCurrentFile("copy_without_ext");
+
+    // Assert: .yaml ではなく元ファイルと同じ .json が付与される
+    expect(fetch).toHaveBeenCalledWith("/psm/duplicate-file", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ src: "current.json", dst: "copy_without_ext.json" })
+    }));
+
+    // Act: リネームも同様
+    await renameCurrentFile("renamed_without_ext");
+
+    // Assert
+    expect(fetch).toHaveBeenCalledWith("/psm/rename-file", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ src: "copy_without_ext.json", dst: "renamed_without_ext.json" })
+    }));
+  });
+
+  it("3.7 duplicateCurrentFile: 拡張子が明示指定されている場合はそれを優先すること", async () => {
+    // Arrange: 選択中は .json だが、複製先で明示的に .yaml を指定した場合
+    state.selectedFile = "current.json";
+    const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
+    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+
+    // Act
+    await duplicateCurrentFile("explicit_copy.yaml");
+
+    // Assert
+    expect(fetch).toHaveBeenCalledWith("/psm/duplicate-file", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ src: "current.json", dst: "explicit_copy.yaml" })
+    }));
+  });
+});
+
+// -------------------------------------------------------------------------
+// 19. 保存高速化 (フェーズC): YAML→JSON変換
+// -------------------------------------------------------------------------
+import { convertCurrentFileToJson } from "../src/store";
+
+describe("convertCurrentFileToJson - 既存YAMLファイルのJSON変換", () => {
+  it("19.1 選択中ファイルが .yaml の場合、/psm/convert-to-json を呼び、成功時は変換後のファイルを選択・再読み込みすること", async () => {
+    // Arrange
+    state.selectedFile = "legacy.yaml";
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url) === "/psm/convert-to-json") {
+        return { ok: true, json: async () => ({ status: "success", file: "legacy.json" }) } as Response;
+      }
+      if (String(url) === "/psm/list-files") {
+        return { ok: true, json: async () => ({ files: ["legacy.json"] }) } as Response;
+      }
+      // get-prompts (loadPrompts内)
+      return { ok: true, json: async () => ({ positive: [], negative: [] }) } as Response;
+    });
+
+    // Act
+    const result = await convertCurrentFileToJson();
+
+    // Assert
+    expect(fetch).toHaveBeenCalledWith("/psm/convert-to-json", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ src: "legacy.yaml" }),
+    }));
+    expect(result.status).toBe("success");
+    expect(state.selectedFile).toBe("legacy.json");
+  });
+
+  it("19.2 選択中ファイルが .json の場合は変換対象外としてAPIを呼ばずエラーを返すこと", async () => {
+    // Arrange
+    state.selectedFile = "already.json";
+
+    // Act
+    const result = await convertCurrentFileToJson();
+
+    // Assert
+    expect(result.status).toBe("error");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("19.3 ファイル未選択の場合はAPIを呼ばずエラーを返すこと", async () => {
+    // Arrange
+    state.selectedFile = "";
+
+    // Act
+    const result = await convertCurrentFileToJson();
+
+    // Assert
+    expect(result.status).toBe("error");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("19.4 変換に失敗した場合、選択中ファイルを変更しないこと", async () => {
+    // Arrange
+    state.selectedFile = "legacy.yaml";
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "error", message: "already exists" }),
+    } as Response);
+
+    // Act
+    const result = await convertCurrentFileToJson();
+
+    // Assert
+    expect(result.status).toBe("error");
+    expect(state.selectedFile).toBe("legacy.yaml");
   });
 });
 
@@ -1108,7 +1226,7 @@ describe("importInfotext - 取込の適用", () => {
     expect(state.positive.map((i) => i.content)).toEqual(["masterpiece", "1girl"]);
   });
 
-  it("12.15 ファイル名指定時は新規ファイルとして保存されること", async () => {
+  it("12.15 ファイル名指定時は新規ファイルとして保存されること (拡張子省略時は.json)", async () => {
     // Arrange
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success", files: [] }) } as Response);
 
@@ -1118,9 +1236,9 @@ describe("importInfotext - 取込の適用", () => {
     // Assert
     const call = vi.mocked(fetch).mock.calls.find((c) => c[0] === "/psm/save-prompts");
     const body = JSON.parse((call![1] as RequestInit).body as string);
-    expect(body.file).toBe("from_png.yaml");
+    expect(body.file).toBe("from_png.json");
     expect(JSON.stringify(body.positive)).toContain("1girl");
-    expect(state.selectedFile).toBe("from_png.yaml");
+    expect(state.selectedFile).toBe("from_png.json");
   });
 });
 
@@ -1975,13 +2093,13 @@ describe("カテゴリ整列とAnimaテンプレート (Phase 3)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("8.7 createYamlFile: テンプレート指定時に model_mode: anima と雛形が送信されること", async () => {
+  it("8.7 createPromptFile: テンプレート指定時に model_mode: anima と雛形が送信されること", async () => {
     // Arrange
     const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
     vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
 
     // Act
-    await createYamlFile("anima_new", true);
+    await createPromptFile("anima_new", true);
 
     // Assert
     const call = vi.mocked(fetch).mock.calls.find(c => c[0] === "/psm/save-prompts");
@@ -1989,7 +2107,7 @@ describe("カテゴリ整列とAnimaテンプレート (Phase 3)", () => {
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body.model_mode).toBe("anima");
     expect(JSON.stringify(body.positive)).toContain("score_7");
-    expect(state.selectedFile).toBe("anima_new.yaml");
+    expect(state.selectedFile).toBe("anima_new.json");
   });
 });
 
@@ -2548,5 +2666,110 @@ describe("フィルター機能: グループ開閉状態のスナップショ�
     // Assert: 追加分はスナップショットにないため isOpen はそのまま
     expect(existing.isOpen).toBe(false);
     expect(added.isOpen).toBe(true);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 17. ペインヘッダー: 有効なプロンプトの一括無効化
+// -------------------------------------------------------------------------
+import { disableAllInPane } from "../src/store";
+
+describe("disableAllInPane: ペイン内の有効なプロンプトを一括で無効化する", () => {
+  beforeEach(() => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+  });
+
+  const leaf = (id: number, name: string, enabled = true, isLocked = false): PsmItem => ({
+    id, name, content: "tag", enabled, weight: 1.0, is_group: false, isLocked,
+  });
+  const grp = (id: number, name: string, children: PsmItem[], enabled = true, isLocked = false): PsmItem => ({
+    id, name, content: "", enabled, weight: 1.0, is_group: true, isOpen: true, isLocked, children,
+  });
+
+  it("17.1 ルート直下の有効なアイテムをすべて無効化すること", async () => {
+    // Arrange
+    const items = [leaf(1, "a", true), leaf(2, "b", true), leaf(3, "c", false)];
+
+    // Act
+    await disableAllInPane(items);
+
+    // Assert
+    expect(items.map((i) => i.enabled)).toEqual([false, false, false]);
+  });
+
+  it("17.2 ネストしたグループ内の子要素も再帰的に無効化すること", async () => {
+    // Arrange
+    const child = leaf(2, "child", true);
+    const items = [grp(1, "group", [child], true)];
+
+    // Act
+    await disableAllInPane(items);
+
+    // Assert
+    expect(items[0].enabled).toBe(false);
+    expect(child.enabled).toBe(false);
+  });
+
+  it("17.3 ロックされたアイテムは無効化の対象外とすること", async () => {
+    // Arrange: isItemLocked は state.positive/negative からアイテムを探索するため、state にも登録する
+    const items = [leaf(1, "locked", true, true), leaf(2, "normal", true)];
+    state.positive = items;
+    state.negative = [];
+
+    // Act
+    await disableAllInPane(items);
+
+    // Assert
+    expect(items[0].enabled).toBe(true); // ロックされているため変化なし
+    expect(items[1].enabled).toBe(false);
+  });
+
+  it("17.4 ロックされたグループの子孫はすべて無効化の対象外とすること", async () => {
+    // Arrange: グループ自体がロックされている場合、isItemLocked は子孫にも祖先ロックとして波及する
+    const child = leaf(2, "child", true);
+    const items = [grp(1, "lockedGroup", [child], true, true)];
+    state.positive = items;
+    state.negative = [];
+
+    // Act
+    await disableAllInPane(items);
+
+    // Assert
+    expect(items[0].enabled).toBe(true);
+    expect(child.enabled).toBe(true);
+  });
+});
+
+// -------------------------------------------------------------------------
+// 18. 保存高速化: タブを閉じる際のflush (flushPromptsOnUnload)
+// -------------------------------------------------------------------------
+// バックエンドの save-prompts はディスク書き込みをデバウンスするようになったため、
+// タブを閉じる直前に sendBeacon で明示的にflushさせる必要がある。
+
+describe("flushPromptsOnUnload - タブを閉じる際の保存flush", () => {
+  it("18.1 選択中ファイルがある場合、sendBeacon で /psm/flush-prompts へ通知すること", () => {
+    // Arrange
+    state.selectedFile = "current.yaml";
+
+    // Act
+    flushPromptsOnUnload();
+
+    // Assert
+    expect(mockSendBeacon).toHaveBeenCalledTimes(1);
+    const [url, blob] = mockSendBeacon.mock.calls[0];
+    expect(url).toBe("/psm/flush-prompts");
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe("application/json");
+  });
+
+  it("18.2 選択中ファイルが無い場合は sendBeacon を呼ばないこと", () => {
+    // Arrange
+    state.selectedFile = "";
+
+    // Act
+    flushPromptsOnUnload();
+
+    // Assert
+    expect(mockSendBeacon).not.toHaveBeenCalled();
   });
 });

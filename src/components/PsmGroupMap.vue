@@ -6,65 +6,15 @@
  */
 import { computed, ref } from "vue";
 import { state } from "../store";
-import { PsmItem } from "../types";
+import { buildGroupMap } from "../groupMapUtils";
 
 const isHovered = ref(false);
-
-// グループのみを再帰的に抽出する型
-type GroupMapItem = {
-  id: number;
-  name: string;
-  depth: number;
-  enabled: boolean;
-  activeCount: number;
-};
-
-const countActivePrompts = (node: PsmItem): number => {
-  if (!node.enabled) return 0; // 親が無効なら子も無効とみなす
-  if (!node.is_group) return 1; // プロンプトなら1カウント
-  if (!node.children) return 0;
-  
-  return node.children.reduce((sum, child) => sum + countActivePrompts(child), 0);
-};
-
-const extractGroups = (nodes: PsmItem[], depth = 0): GroupMapItem[] => {
-  let result: GroupMapItem[] = [];
-  for (const node of nodes) {
-    if (!node) continue;
-    if (node.is_group) {
-      // グループ自体の有効数をカウント (自分以下の子孫プロンプト数)
-      // 注意: countActivePromptsは自分自身がGroupの場合、再帰的に子を見る
-      // ただし countActivePrompts の実装上、Group自身はカウントせず子だけ見る必要があるが
-      // 上記の実装では is_group なら children を走査しているのでOK
-      const count = countActivePrompts(node);
-      
-      result.push({
-        id: node.id,
-        name: node.name || "(No Name)",
-        depth,
-        enabled: node.enabled,
-        activeCount: count,
-      });
-      if (node.children) {
-        result = result.concat(extractGroups(node.children, depth + 1));
-      }
-    }
-  }
-  return result;
-};
 
 // Positive / Negative 両方のツリーを結合して表示
 // ただし表示中のステート(isOpen)などを考慮する？
 // ここではシンプルに現在存在するグループを全て羅列する
 // あるいはセクション分けする
-const groupList = computed(() => {
-  return [
-    { type: 'header', label: 'Positive' },
-    ...extractGroups(state.positive),
-    { type: 'header', label: 'Negative' },
-    ...extractGroups(state.negative),
-  ];
-});
+const groupList = computed(() => buildGroupMap(state.positive, state.negative));
 
 const scrollToNode = (id: number) => {
   const el = document.getElementById(`node-${id}`);

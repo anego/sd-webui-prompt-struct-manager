@@ -46,6 +46,7 @@ import { useI18n } from "./composables/useI18n";
 const { t } = useI18n();
 
 const buildTimestamp = __BUILD_TIMESTAMP__;
+const psmVersion = __PSM_VERSION__;
 
 const getWebUiRoot = (): Document | ShadowRoot => {
   const gradioApp = document.querySelector("gradio-app");
@@ -546,6 +547,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         <v-toolbar density="compact" color="surface" elevation="4">
           <v-toolbar-title class="text-subtitle-1 font-weight-bold text-orange">
             📂 {{ t('appName') }}
+            <span class="text-caption font-weight-regular text-grey">v{{ psmVersion }}</span>
             <span v-if="state.isDevMode" class="text-caption ml-2 text-grey">
                ({{ buildTimestamp }})
             </span>
