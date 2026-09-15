@@ -1,12 +1,46 @@
 import urllib.parse
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Union, Optional
 import gradio as gr
-from scripts.psm import config, storage, translate as translate_mod, tagdb
+from scripts.psm import cache, config, storage, translate as translate_mod, tagdb
 
 def register_api(demo: gr.Blocks, app: FastAPI) -> None:
     print("\n[PSM] Registering API endpoints (Ver2 Bulletproof API)...")
+
+    @app.on_event("shutdown")
+    async def flush_pending_saves_on_shutdown() -> None:
+        """
+        WebUIの通常終了・再起動時に、デバウンス待ちの保留中の変更を
+        ディスクへ確実に書き込んでからプロセスを終了させる。
+        """
+        cache.flush_all(storage.writer_for)
+        print("[PSM] シャットダウン時に保留中のプロンプト変更をすべて保存しました。")
+
+    @app.post("/psm/flush-prompts")
+    async def flush_prompts(request: Request) -> JSONResponse:
+        """
+        指定ファイルの保留中のキャッシュ変更を即座にディスクへ反映します。
+        ブラウザタブを閉じる直前 (beforeunload + sendBeacon) からの呼び出しを想定。
+        """
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse(content={"status": "error", "message": "Invalid JSON body"})
+
+            file_name: Optional[str] = body.get("file")
+            if not isinstance(file_name, str) or not file_name:
+                return JSONResponse(content={"status": "error", "message": "Invalid file name"})
+
+            decoded_file = urllib.parse.unquote(file_name)
+            target_dir: Path = config.get_psm_dir()
+            path: Path = (target_dir / decoded_file).resolve()
+            cache.flush(path, storage.writer_for(path))
+            return JSONResponse(content={"status": "success"})
+        except Exception as e:
+            print(f"[PSM ERROR] flush-prompts failed: {e}")
+            return JSONResponse(content={"status": "error", "message": str(e)})
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -88,10 +122,10 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
     @app.get("/psm/list-files")
     async def list_files(request: Request) -> JSONResponse:
         """
-        YAMLファイルの一覧を返します。
+        プロンプトファイル (.yaml / .json) の一覧を返します。
         """
         try:
-            files = storage.list_yaml_files()
+            files = storage.list_prompt_files()
             return JSONResponse(content={"files": files})
         except Exception as e:
             print(f"[PSM ERROR] list-files failed: {e}")
@@ -273,6 +307,31 @@ def register_api(demo: gr.Blocks, app: FastAPI) -> None:
             return JSONResponse(content=result)
         except Exception as e:
             print(f"[PSM ERROR] rename-file failed: {e}")
+            return JSONResponse(content={"status": "error", "message": str(e)})
+
+    @app.post("/psm/convert-to-json")
+    async def convert_to_json(request: Request) -> JSONResponse:
+        """
+        既存の .yaml ファイルを同内容の .json ファイルへ変換します。
+        元の .yaml ファイルは変更せずそのまま残ります。
+        """
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse(content={"status": "error", "message": "Invalid JSON body"})
+
+            src = body.get("src")
+            dst = body.get("dst")
+            if not isinstance(src, str) or not src:
+                return JSONResponse(content={"status": "error", "message": "src name is missing"})
+
+            decoded_src = urllib.parse.unquote(src)
+            decoded_dst = urllib.parse.unquote(dst) if isinstance(dst, str) and dst else None
+
+            result = storage.convert_yaml_to_json(decoded_src, decoded_dst)
+            return JSONResponse(content=result)
+        except Exception as e:
+            print(f"[PSM ERROR] convert-to-json failed: {e}")
             return JSONResponse(content={"status": "error", "message": str(e)})
 
     @app.get("/psm/generation-profiles")

@@ -8,7 +8,7 @@ console.info(`[PSM] メインスクリプト (main.ts) が正常に読み込ま�
 
 import { createApp } from "vue";
 import App from "./App.vue";
-import { state, listFiles, loadPrompts, loadConfig } from "./store";
+import { state, listFiles, loadPrompts, loadConfig, flushPromptsOnUnload } from "./store";
 import { Logger } from "./log";
 
 // Vuetify
@@ -65,6 +65,10 @@ const mountPsmApp = async () => {
     window.addEventListener("psm-toggle", () => {
       state.isVisible = !state.isVisible;
     });
+
+    // タブを閉じる/リロードする際、サーバー側のデバウンス待ちの保存を確実にflushする
+    window.addEventListener("beforeunload", flushPromptsOnUnload);
+    window.addEventListener("pagehide", flushPromptsOnUnload);
 
     await loadConfig();
     if (state.isConfigured) {

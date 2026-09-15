@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { state, saveConfig, createYamlFile } from "../store";
+import { state, saveConfig, createPromptFile } from "../store";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -34,7 +34,7 @@ const handleFinish = async () => {
         
         // 2. Create Initial File
         // The backend relies on config.json being present (which it is now)
-        await createYamlFile(filename.value);
+        await createPromptFile(filename.value);
         
         // Explicitly set configured if somehow logic drifted, but saveConfig does it.
     } catch (e) {
@@ -112,7 +112,7 @@ const handleFinish = async () => {
                     v-model="filename"
                     label="Filename"
                     variant="outlined"
-                    suffix=".yaml"
+                    suffix=".json"
                     prepend-inner-icon="mdi-file"
                     hide-details
                     autofocus

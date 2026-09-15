@@ -12,3 +12,6 @@ declare module '*.vue' {
 }
 
 declare const __BUILD_TIMESTAMP__: string;
+
+// package.json の version (vite.config.ts の define でビルド時に埋め込まれる)
+declare const __PSM_VERSION__: string;

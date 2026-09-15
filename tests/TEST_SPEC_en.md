@@ -19,6 +19,8 @@ Quality assurance in PSM Ver2 is built on a 3-layered hierarchical test architec
 - **API Configs:** Validates `get-config` and `set-config` logic, folder paths structure, and fallback locations.
 - **YAML I/O:** Assures safe YAML saving/loading, profile integration inside files, duplicating, renaming, and deleting of files.
 - **String Parsing:** Tests negative/positive prompt cleanups, bracket additions for weights, and Dynamic Prompts translations.
+- **Save Speed (write cache):** Verifies `save-prompts` updates only the in-memory cache without disk I/O, explicit flushing via `flush-prompts`, read-your-own-writes consistency for `get-prompts`, that duplicate/rename/delete correctly handle pending unflushed cache changes (preventing stale copies and deleted-file resurrection), and that the shutdown event flushes everything (see `test_psm_cache.py` for cache-level debounce unit tests).
+- **YAML→JSON Migration:** Verifies reading/writing `.json` files, that `list-files` includes both `.yaml` and `.json` while excluding `generation_profiles.json`, `convert-to-json` behavior (reflecting unflushed pending changes, leaving the source untouched, refusing to overwrite an existing destination), and that duplicate/rename inherit the source file's format when no extension is given.
 
 ### 2.2 Frontend Store Logic Tests (`Vitest` - 23 Cases)
 - **Core Operations:** Tests node addition, editing, removal, and drag placement on store states.
@@ -30,6 +32,8 @@ Quality assurance in PSM Ver2 is built on a 3-layered hierarchical test architec
 - **Duplicate Checking:** Tests mode transitions between `none`, `warn`, and `error` modes.
 - **Loading Control:** Verifies the reactive coordination of `isLoading` and `loadingText` state counters during initial file load operations, ensuring that the spinner does not lock user interactions during daily auto-saving (`savePrompts`) (2 cases).
 - **Compile Formatting (Underscore Replacement):** Assures auto-replacement of underscores with spaces for prompt content, and underscore preservation for Dynamic Prompts wildcards (`__wildcard__`) (1 case added).
+- **Group Map Aggregation (`groupMapUtils.ts`):** Verifies the single-pass active-prompt-count walk (reusing child results) matches the old implementation's behavior for nested groups, including that a disabled ancestor doesn't affect a descendant group's own count (`groupMapUtils.spec.ts`, 10 cases added).
+- **Save Speed (Phase C):** Verifies `createPromptFile` defaults to `.json` when no extension is given, that `duplicateCurrentFile`/`renameCurrentFile` inherit the source file's extension instead of forcing `.yaml`, and the success/error paths of `convertCurrentFileToJson`.
 - **Search Filter Group Open-State Snapshot/Restore:** Verifies that each group's open/collapsed state is recorded by `id` when a filter starts, that it is correctly restored (including nested groups) after the filter auto-expands groups and is then cleared, and that groups added while filtering are excluded from restoration (4 cases added).
 
 ### 2.3 E2E Tests (`Playwright` - 12 Cases)

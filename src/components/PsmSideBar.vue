@@ -24,6 +24,7 @@ import {
   translateText,
   TRANSLATE_PRESETS,
   bulkAssignCategories,
+  convertCurrentFileToJson,
 } from "../store";
 import { useI18n } from "../composables/useI18n";
 import { computed } from "vue";
@@ -93,9 +94,34 @@ const emit = defineEmits<{
   (e: "deleteFile"): void;
 }>();
 
+// ---- YAML→JSON変換 (保存高速化フェーズC) ----
+
+const isConvertingToJson = ref(false);
+const convertResult = ref("");
+
+/** 選択中ファイルが .yaml の場合のみ、同内容の .json ファイルへ変換する */
+const onConvertToJson = async () => {
+  if (isConvertingToJson.value) return;
+  isConvertingToJson.value = true;
+  convertResult.value = "";
+  try {
+    const r = await convertCurrentFileToJson();
+    convertResult.value = r.status === "success"
+      ? t("convertToJsonSuccess")
+      : (r.message || t("convertToJsonFailed"));
+  } finally {
+    isConvertingToJson.value = false;
+  }
+};
+
 const isRecording = ref(false);
 
 import { watch } from "vue";
+
+// 選択ファイルが変わったら、前のファイルに対する変換結果メッセージを消す
+watch(() => state.selectedFile, () => {
+  convertResult.value = "";
+});
 
 const handleRecordKey = (e: KeyboardEvent) => {
   e.preventDefault();
@@ -171,7 +197,7 @@ onUnmounted(() => {
         <div class="d-flex align-center mb-2">
         <v-select
           v-model="state.selectedFile"
-          :items="state.yamlFiles"
+          :items="state.promptFiles"
           density="compact"
            hide-details
            variant="outlined"
@@ -215,6 +241,17 @@ onUnmounted(() => {
             @click="emit('openDialog', 'rename')"
             :title="t('rename')"
           ></v-btn>
+          <v-btn
+            icon="mdi-file-swap-outline"
+            size="x-small"
+            color="teal"
+            variant="tonal"
+            :loading="isConvertingToJson"
+            :disabled="!state.selectedFile || !state.selectedFile.endsWith('.yaml')"
+            @click="onConvertToJson"
+            data-testid="convert-to-json-btn"
+            :title="t('convertToJson')"
+          ></v-btn>
           <v-spacer></v-spacer>
           <v-btn
             icon="mdi-delete"
@@ -226,6 +263,7 @@ onUnmounted(() => {
             :title="t('delete')"
           ></v-btn>
         </div>
+        <div v-if="convertResult" class="text-caption text-grey mb-4">{{ convertResult }}</div>
 
         <v-divider class="mb-4"></v-divider>
 
