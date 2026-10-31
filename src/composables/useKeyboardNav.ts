@@ -83,7 +83,7 @@ export const useKeyboardNav = (callbacks?: { onContextMenu?: () => void }) => {
        return;
     }
 
-    if (state.isEditing || state.isDeleting || !state.isVisible) return;
+    if (state.isEditing || state.isDeleting || state.disableAllConfirm || !state.isVisible) return;
 
     switch (e.key) {
       case "ArrowDown":

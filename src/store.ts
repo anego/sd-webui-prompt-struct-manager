@@ -98,6 +98,8 @@ export const state = reactive({
   isMoveDialogOpen: false,
   /** 移動対象のアイテム */
   moveDialogItem: null as PsmItem | null,
+  /** ペイン一括無効化の確認待ち状態 (null の間は確認ダイアログを表示しない) */
+  disableAllConfirm: null as { title: string; items: PsmItem[] } | null,
   /** 最近使った移動先 (localStorageに保存) */
   recentMoveTargets: [] as { id: number | string; path: string }[],
   /** ドラッグ中にドロップ先としてハイライトするグループID */
@@ -719,6 +721,29 @@ export const disableAllInPane = async (items: PsmItem[]) => {
 };
 
 /**
+ * ペイン一括無効化の確認を要求する (ここではまだ何も無効化しない)。
+ * 誤操作で多数のプロンプトが一度に無効化されるのを防ぐため、確認ダイアログを経由して実行する
+ * @param title 確認メッセージに表示するペイン名
+ * @param items 無効化対象のペインのルートアイテム配列
+ */
+export const requestDisableAll = (title: string, items: PsmItem[]) => {
+  state.disableAllConfirm = { title, items };
+};
+
+/** ペイン一括無効化の確認をキャンセルする (何も変更しない) */
+export const cancelDisableAll = () => {
+  state.disableAllConfirm = null;
+};
+
+/** 確認済みのペイン一括無効化を実行する。確認待ちが無い場合は何もしない */
+export const confirmDisableAll = async () => {
+  const target = state.disableAllConfirm;
+  state.disableAllConfirm = null;
+  if (!target) return;
+  await disableAllInPane(target.items);
+};
+
+/**
  * ローディング表示を開始するヘルパー関数
  */
 export const startLoading = (textKey: string) => {
@@ -1321,6 +1346,19 @@ export const loadConfig = async () => {
   } catch (e) {
     Logger.error("[Store/Config] サーバーからのグローバル設定読み込みに失敗しました。", e);
   }
+};
+
+/**
+ * アプリ起動時の初期化 (設定 → ファイル一覧 → 生成設定プロファイル)。
+ * listFiles は前回選択ファイル (lastFile) があれば内部で loadPrompts まで行うため、
+ * ここで loadPrompts を重ねて呼ぶと get-prompts が重複実行される。
+ * 呼び出し元はアプリ全体で1か所 (App.vue の onMounted) に限ること。
+ */
+export const initializePsm = async () => {
+  await loadConfig();
+  if (!state.isConfigured) return;
+  await listFiles();
+  await loadGenerationProfiles();
 };
 
 /**

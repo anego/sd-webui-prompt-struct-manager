@@ -9,7 +9,8 @@ import {
   duplicateCurrentFile,
   renameCurrentFile,
   deleteCurrentFile,
-  flushPromptsOnUnload
+  flushPromptsOnUnload,
+  initializePsm
 } from "../src/store";
 import { PsmItem } from "../src/types";
 
@@ -2741,6 +2742,94 @@ describe("disableAllInPane: ペイン内の有効なプロンプトを一括で�
 });
 
 // -------------------------------------------------------------------------
+// 17b. 一括無効化の確認フロー (requestDisableAll / confirmDisableAll / cancelDisableAll)
+// -------------------------------------------------------------------------
+// 誤操作で多数のプロンプトが一度に無効化されないよう、要求時点では何も変更せず、
+// 確認ダイアログで確定された場合のみ実行する。
+import { requestDisableAll, confirmDisableAll, cancelDisableAll } from "../src/store";
+
+describe("一括無効化の確認フロー", () => {
+  beforeEach(() => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    state.selectedFile = "confirm.json";
+    state.disableAllConfirm = null;
+  });
+
+  const leaf = (id: number, enabled = true): PsmItem => ({
+    id, name: `n${id}`, content: "tag", enabled, weight: 1.0, is_group: false,
+  });
+
+  it("17b.1 requestDisableAll: 確認待ち状態になるだけで、この時点ではプロンプトを無効化しないこと", () => {
+    // Arrange
+    const items = [leaf(1), leaf(2)];
+
+    // Act
+    requestDisableAll("Positive", items);
+
+    // Assert
+    expect(state.disableAllConfirm?.title).toBe("Positive");
+    expect(items.map((i) => i.enabled)).toEqual([true, true]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("17b.2 confirmDisableAll: 確定すると対象ペインのプロンプトが無効化・保存され、確認待ちが解除されること", async () => {
+    // Arrange
+    const items = [leaf(1), leaf(2)];
+    state.positive = items;
+    state.negative = [];
+    requestDisableAll("Positive", state.positive);
+
+    // Act
+    await confirmDisableAll();
+
+    // Assert
+    expect(state.positive.map((i) => i.enabled)).toEqual([false, false]);
+    expect(state.disableAllConfirm).toBeNull();
+    expect(fetch).toHaveBeenCalledWith("/psm/save-prompts", expect.any(Object));
+  });
+
+  it("17b.3 cancelDisableAll: キャンセルすると何も変更されず、保存も行われず、確認待ちが解除されること", () => {
+    // Arrange
+    const items = [leaf(1), leaf(2)];
+    requestDisableAll("Positive", items);
+
+    // Act
+    cancelDisableAll();
+
+    // Assert
+    expect(items.map((i) => i.enabled)).toEqual([true, true]);
+    expect(state.disableAllConfirm).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("17b.4 confirmDisableAll: 確認待ちが無い場合は何も実行しないこと", async () => {
+    // Arrange
+    state.disableAllConfirm = null;
+
+    // Act
+    await confirmDisableAll();
+
+    // Assert
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("17b.5 confirmDisableAll: 2回続けて確定しても、2回目は何も実行しないこと (二重実行防止)", async () => {
+    // Arrange
+    state.positive = [leaf(1)];
+    state.negative = [];
+    requestDisableAll("Positive", state.positive);
+
+    // Act
+    await confirmDisableAll();
+    vi.mocked(fetch).mockClear();
+    await confirmDisableAll();
+
+    // Assert
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------------------------
 // 18. 保存高速化: タブを閉じる際のflush (flushPromptsOnUnload)
 // -------------------------------------------------------------------------
 // バックエンドの save-prompts はディスク書き込みをデバウンスするようになったため、
@@ -2771,5 +2860,88 @@ describe("flushPromptsOnUnload - タブを閉じる際の保存flush", () => {
 
     // Assert
     expect(mockSendBeacon).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------------------------
+// 20. 起動時の初期化 (initializePsm): get-prompts の重複実行防止
+// -------------------------------------------------------------------------
+// 以前は main.ts と App.vue の onMounted の2か所で同じ初期化が走り、
+// さらに listFiles 内部の loadPrompts とも重なって get-prompts が起動時に3回実行されていた。
+
+describe("initializePsm - 起動時の初期化", () => {
+  const mockServer = (isConfigured: boolean) => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const u = String(url);
+      if (u === "/psm/get-config") {
+        return { ok: true, json: async () => ({ save_dir: "C:/psm", is_configured: isConfigured }) } as Response;
+      }
+      if (u === "/psm/list-files") {
+        return { ok: true, json: async () => ({ files: ["main.json"] }) } as Response;
+      }
+      if (u.startsWith("/psm/get-prompts")) {
+        return { ok: true, json: async () => ({ positive: [], negative: [] }) } as Response;
+      }
+      if (u === "/psm/generation-profiles") {
+        return { ok: true, json: async () => ({ profiles: [] }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+  };
+  const callsTo = (prefix: string) =>
+    vi.mocked(fetch).mock.calls.filter((c) => String(c[0]).startsWith(prefix));
+
+  it("20.1 前回選択ファイルがある場合、get-prompts は1回だけ実行されること", async () => {
+    // Arrange
+    mockServer(true);
+    state.selectedFile = "";
+    state.lastFile = "main.json";
+
+    // Act
+    await initializePsm();
+
+    // Assert
+    expect(callsTo("/psm/get-prompts")).toHaveLength(1);
+    expect(state.selectedFile).toBe("main.json");
+  });
+
+  it("20.2 生成設定プロファイルも初期化で1回だけ読み込まれること", async () => {
+    // Arrange
+    mockServer(true);
+    state.selectedFile = "";
+    state.lastFile = "main.json";
+
+    // Act
+    await initializePsm();
+
+    // Assert
+    expect(callsTo("/psm/generation-profiles")).toHaveLength(1);
+  });
+
+  it("20.3 初期設定が未完了の場合はファイル一覧・プロンプトを読み込まないこと", async () => {
+    // Arrange
+    mockServer(false);
+    state.selectedFile = "";
+
+    // Act
+    await initializePsm();
+
+    // Assert
+    expect(callsTo("/psm/list-files")).toHaveLength(0);
+    expect(callsTo("/psm/get-prompts")).toHaveLength(0);
+  });
+
+  it("20.4 前回選択ファイルが無い/一覧に存在しない場合は get-prompts を実行しないこと", async () => {
+    // Arrange
+    mockServer(true);
+    state.selectedFile = "";
+    state.lastFile = "deleted.json";
+
+    // Act
+    await initializePsm();
+
+    // Assert
+    expect(callsTo("/psm/get-prompts")).toHaveLength(0);
+    expect(state.selectedFile).toBe("");
   });
 });

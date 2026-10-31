@@ -21,7 +21,7 @@ import {
   toggleShowHiddenGroups,
   snapshotGroupOpenState,
   restoreGroupOpenState,
-  disableAllInPane,
+  requestDisableAll,
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
 import { useI18n } from "../composables/useI18n";
@@ -150,7 +150,7 @@ const openPane = () => emit("update:isOpen", true);
           variant="text"
           color="grey"
           class="flex-shrink-0"
-          @click.stop="disableAllInPane(items)"
+          @click.stop="requestDisableAll(title, items)"
           :title="t('disableAllInPane')"
           data-testid="disable-all-in-pane"
         >
