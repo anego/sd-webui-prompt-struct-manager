@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { toRaw } from "vue";
 import {
   state,
   getCompiledPrompts,
@@ -1264,8 +1265,9 @@ describe("ドラッグ&ドロップ (クローン方式)", () => {
     const list = [leaf(1, "a"), leaf(2, "b")];
     beginDrag(list, 1);
     expect(state.isDragging).toBe(true);
-    expect(state.draggedItem).toBe(list[1]);
-    expect(state.draggedFromList).toBe(list);
+    // state から取り出すとリアクティブProxyになるため、元のオブジェクト同士で比較する
+    expect(toRaw(state.draggedItem)).toBe(list[1]);
+    expect(toRaw(state.draggedFromList)).toBe(list);
   });
 
   it("15.2 endDrag: 状態がすべてリセットされること", () => {
@@ -1460,7 +1462,8 @@ describe("移動先クイック選択", () => {
     const item = leaf("対象");
     openMoveDialog(item);
     expect(state.isMoveDialogOpen).toBe(true);
-    expect(state.moveDialogItem).toBe(item);
+    // state から取り出すとリアクティブProxyになるため、元のオブジェクト同士で比較する
+    expect(toRaw(state.moveDialogItem)).toBe(item);
 
     closeMoveDialog();
     expect(state.isMoveDialogOpen).toBe(false);
@@ -2408,9 +2411,8 @@ import {
 
 describe("グループロック機能 (Phase 7)", () => {
   // 親グループ(ロック対象) > 子グループ > 孫アイテム、という3階層のツリーを構築するヘルパー
-  // state.positive へ格納した「後」の参照 (Vueのreactivityラップ後の実体) を返すことで、
-  // store.ts内部の state.positive を辿る参照比較 (isListLockedの children === list など) と
-  // オブジェクト参照が一致するようにする
+  // アプリ上と同じく state.positive へ格納した「後」の参照 (リアクティブProxy) を返す
+  // (Proxyを経由しない元の配列でも判定できることは 14.6b で検証する)
   const buildLockedTree = (parentLocked: boolean) => {
     const grandChild: PsmItem = {
       id: 3, name: "grandchild", content: "tag", enabled: true, weight: 1.0, is_group: false,
@@ -2467,6 +2469,16 @@ describe("グループロック機能 (Phase 7)", () => {
     buildLockedTree(true);
     expect(isListLocked(state.positive)).toBe(false);
     expect(isListLocked(state.negative)).toBe(false);
+  });
+
+  it("14.6b isListLocked: Proxyを経由しない元の配列を渡しても、ロック判定・ルート判定ができること", () => {
+    // Arrange
+    const { parentGroup, childGroup } = buildLockedTree(true);
+
+    // Act & Assert: Proxyとは参照が異なる元の配列でも同じ結果になる
+    expect(isListLocked(toRaw(parentGroup.children!))).toBe(true);
+    expect(isListLocked(toRaw(childGroup.children!))).toBe(true);
+    expect(isListLocked(toRaw(state.positive))).toBe(false);
   });
 
   it("14.7 toggleGroupLock: ロックされていないグループのisLockedをトグルできること", async () => {

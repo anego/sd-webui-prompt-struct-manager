@@ -5160,20 +5160,21 @@ var gd = !1, _d = (e) => {
 	};
 	return t(q.positive, !1) ?? t(q.negative, !1) ?? !1;
 }, Md = (e) => {
-	if (e === q.positive || e === q.negative) return !1;
-	let t = (n, r) => {
-		for (let i of n) {
+	let t = /* @__PURE__ */ mn(e);
+	if (t === /* @__PURE__ */ mn(q.positive) || t === /* @__PURE__ */ mn(q.negative)) return !1;
+	let n = (e, r) => {
+		for (let i of e) {
 			if (!i) continue;
-			let n = r || !!i.isLocked;
-			if (i.is_group && i.children === e) return n;
+			let e = r || !!i.isLocked;
+			if (i.is_group && i.children && /* @__PURE__ */ mn(i.children) === t) return e;
 			if (i.is_group && i.children) {
-				let e = t(i.children, n);
-				if (e !== null) return e;
+				let t = n(i.children, e);
+				if (t !== null) return t;
 			}
 		}
 		return null;
 	};
-	return t(q.positive, !1) ?? t(q.negative, !1) ?? !1;
+	return n(q.positive, !1) ?? n(q.negative, !1) ?? !1;
 }, Nd = async (e, t) => {
 	if (jd(e.id) && !e.isLocked) {
 		vd.warn(`[Store/Lock] グループ「${e.name}」は祖先グループがロック中のため、ロック状態を変更できません。`);
@@ -6291,7 +6292,7 @@ var gd = !1, _d = (e) => {
 	q.isDragging = !1, q.draggedItem = null, q.draggedFromList = null, q.dropTargetId = null;
 }, Mp = (e) => {
 	let t = q.draggedFromList, n = q.draggedItem;
-	if (!t || !n || t === e) return !1;
+	if (!t || !n || /* @__PURE__ */ mn(t) === /* @__PURE__ */ mn(e)) return !1;
 	if (jd(n.id) || Md(e)) {
 		let t = e.findIndex((e) => e && e.id === n.id);
 		return t !== -1 && e.splice(t, 1), vd.warn("[Store/Drag] ロック中のため、移動を取り消しました。"), !1;
@@ -6306,7 +6307,13 @@ var gd = !1, _d = (e) => {
 		return t !== -1 && e.splice(t, 1), vd.warn("[Store/Drag] 移動元にアイテムが見つからなかったため、移動を取り消しました。", n), !1;
 	}
 	return t.splice(r, 1), q.selectedProfileName = "", !0;
-}, Np = (e, t) => !e.is_group || !e.children ? !1 : e.children === t || e.children.some((e) => e && Np(e, t)), Pp = async (e, t, n) => {
+}, Np = (e, t) => {
+	let n = /* @__PURE__ */ mn(t), r = /* @__PURE__ */ new Set(), i = (e) => {
+		let t = /* @__PURE__ */ mn(e);
+		return r.has(t) || (r.add(t), !e.is_group || !e.children) ? !1 : /* @__PURE__ */ mn(e.children) === n || e.children.some((e) => e && i(e));
+	};
+	return i(e);
+}, Pp = async (e, t, n) => {
 	if (jd(e.id) || Md(t)) return;
 	let r = (t) => {
 		let n = t.findIndex((t) => t.id === e.id);
@@ -29573,7 +29580,7 @@ var mL = Y({
 								default: L(() => [
 									H(" 📂 " + M(F(t)("appName")) + " ", 1),
 									V("span", gL, "v" + M(F("1.5.1")), 1),
-									F(q).isDevMode ? (z(), B("span", _L, " (" + M(F("2026/10/31 9:06:54")) + ") ", 1)) : So("", !0)
+									F(q).isDevMode ? (z(), B("span", _L, " (" + M(F("2026/10/31 10:28:25")) + ") ", 1)) : So("", !0)
 								]),
 								_: 1
 							}),
@@ -30192,7 +30199,7 @@ function FL(e) {
 	let t = this.$, n = t.parent?.provides ?? t.vnode.appContext?.provides;
 	if (n && e in n) return n[e];
 }
-window.process === void 0 && (window.process = { env: { NODE_ENV: "production" } }), console.info("[PSM] メインスクリプト (main.ts) が正常に読み込まれました。ビルド日時: 2026/10/31 9:06:54");
+window.process === void 0 && (window.process = { env: { NODE_ENV: "production" } }), console.info("[PSM] メインスクリプト (main.ts) が正常に読み込まれました。ビルド日時: 2026/10/31 10:28:25");
 var IL = PL({
 	icons: {
 		defaultSet: "mdi",

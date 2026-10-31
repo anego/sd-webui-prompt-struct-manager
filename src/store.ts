@@ -1,4 +1,4 @@
-import { reactive, watch } from "vue";
+import { reactive, toRaw, watch } from "vue";
 import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile } from "./types";
 import { Logger, setDebugMode } from "./log";
 import { GENERATION_FIELDS, getActiveTabPrefix, captureGenerationSettings } from "./generationFields";
@@ -173,12 +173,14 @@ export const isItemLocked = (targetId: number): boolean => {
  * list がルート配列 (state.positive/negative) の場合は常に false。
  */
 export const isListLocked = (list: PsmItem[]): boolean => {
-  if (list === state.positive || list === state.negative) return false;
+  // state 経由で取り出した配列はリアクティブProxyになるため、元の配列同士で比較する
+  const rawList = toRaw(list);
+  if (rawList === toRaw(state.positive) || rawList === toRaw(state.negative)) return false;
   const search = (nodes: PsmItem[], lockedAncestor: boolean): boolean | null => {
     for (const node of nodes) {
       if (!node) continue;
       const effectiveLocked = lockedAncestor || !!node.isLocked;
-      if (node.is_group && node.children === list) return effectiveLocked;
+      if (node.is_group && node.children && toRaw(node.children) === rawList) return effectiveLocked;
       if (node.is_group && node.children) {
         const found = search(node.children, effectiveLocked);
         if (found !== null) return found;
@@ -2556,7 +2558,8 @@ export const endDrag = () => {
 export const finalizeCrossListMove = (destList: PsmItem[]): boolean => {
   const src = state.draggedFromList;
   const item = state.draggedItem;
-  if (!src || !item || src === destList) return false;
+  // state から取り出した配列はリアクティブProxyのため、元の配列同士で同一リストか判定する
+  if (!src || !item || toRaw(src) === toRaw(destList)) return false;
 
   // ロック中のアイテム、またはロック中グループへのドロップは取り消す
   if (isItemLocked(item.id) || isListLocked(destList)) {
@@ -2588,11 +2591,23 @@ export const finalizeCrossListMove = (destList: PsmItem[]): boolean => {
   return true;
 };
 
-/** 指定のリストが、そのアイテムの子孫のリストかどうかを判定する (循環参照チェック用) */
+/**
+ * 指定のリストが、そのアイテムの子孫のリストかどうかを判定する (循環参照チェック用)
+ * 判定時点で既にドロップ先へ追加済みのため、ツリーに循環が生じている場合がある。
+ * 訪問済みのアイテムを記録して無限再帰を防ぐ
+ */
 const isDescendantList = (item: PsmItem, list: PsmItem[]): boolean => {
-  if (!item.is_group || !item.children) return false;
-  if (item.children === list) return true;
-  return item.children.some((c) => c && isDescendantList(c, list));
+  const rawList = toRaw(list);
+  const visited = new Set<PsmItem>();
+  const walk = (node: PsmItem): boolean => {
+    const rawNode = toRaw(node);
+    if (visited.has(rawNode)) return false;
+    visited.add(rawNode);
+    if (!node.is_group || !node.children) return false;
+    if (toRaw(node.children) === rawList) return true;
+    return node.children.some((c) => c && walk(c));
+  };
+  return walk(item);
 };
 
 export const teleportItem = async (item: PsmItem, dest: PsmItem[], type: string) => {
