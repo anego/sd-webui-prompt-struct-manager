@@ -3,30 +3,48 @@
 ## 1. ビルド環境のセットアップ
 
 ### 必要要件
-- Node.js (v24以上推奨、Voltaによりv24.13.0が指定されています)
-- npm
+- [Bun](https://bun.com/) (1.3以上)
+  - パッケージ管理・ビルド・単体テストのすべてを Bun で行います。Node.js は不要です。
+- Python (SD WebUI の venv) ※ バックエンドテストを実行する場合のみ
 
-### インストール
+### Bun のインストール (Windows)
+[Scoop](https://scoop.sh/) でインストールします。
+```bash
+scoop install bun
+bun --version
+```
+アップデートも Scoop で行います (`bun upgrade` は Scoop の管理外での更新になるため使用しません)。
+```bash
+scoop update bun
+```
+
+### 依存パッケージのインストール
 ```bash
 cd extensions/sd-webui-prompt-struct-manager
-npm install
+bun install
 ```
+バージョンは `bun.lock` で固定されています。
 
 ## 2. ビルドプロセス
 
 ### 通常ビルド
 ```bash
-npm run build
+bun run build
 ```
 このコマンドは内部的に以下のステップを実行します。
-1. `node scripts/embed_font.js`: MDIフォントをBase64化してCSS (`src/mdi-embedded.css`) を生成。
-2. `vite build`: Vueアプリケーションをビルドし、`dist/` ディレクトリに出力。
+1. `bun scripts/embed_font.js`: MDIフォントをBase64化してCSS (`src/mdi-embedded.css`) を生成。
+2. `bun --bun vite build`: Vueアプリケーションをビルドし、`dist/` ディレクトリに出力。
 
-### 開発サーバー
+ビルド結果 (`dist/index.js`) はリポジトリにコミットします。WebUI はこのファイルを読み込むだけのため、エンドユーザー側に Bun や Node.js は不要です。
+
+### ウォッチビルド
 ```bash
-npm run dev
+bun run dev
 ```
-※ WebUIとの連携確認にはビルドファイルの配置が必要なため、通常は `npm run build -- --watch` を使用するか、ホットリロード対応の環境構築が必要です。
+ソースの変更を検知して `dist/` へ再ビルドします。反映には WebUI のリロードが必要です。
+
+### `--bun` 指定について
+`package.json` のスクリプトでは `vite` を `bun --bun vite ...` の形で呼び出しています。Node.js がインストールされているマシンでは、`--bun` を付けないと `vite` 先頭の `#!/usr/bin/env node` に従って Node.js で実行されてしまうためです。スクリプトやツールを追加する際も、Node.js で動いていないか確認してください (確認方法は「4.4 Node.js 非依存の確認」を参照)。
 
 ## 3. ディレクトリ構成と主要ファイル
 
@@ -62,45 +80,50 @@ MDIアイコン (`@mdi/font`) の表示崩れを防ぐための重要スクリ�
 
 ## 4. 自動テスト
 
-本プロジェクトでは、堅牢性と品質向上のため、フロントエンド単体テスト（Vitest）、バックエンド単体テスト（pytest）、実機ブラウザ（Playwright）の3層に分かれた階層的な自動テストスイートを導入しています。
+本プロジェクトでは、フロントエンド単体テスト（`bun test`）とバックエンド単体テスト（pytest）の2種類の自動テストでロジックを、リリース前の手動確認で画面表示と操作を担保しています。テストの詳細は [tests/TEST_SPEC.md](../tests/TEST_SPEC.md) を参照してください。
 
-### 4.1 フロントエンド単体テスト (Vitest)
+### 4.1 フロントエンド単体テスト (`bun test`)
 フロントエンドのストアロジック (`store.ts`) をテストします。重複チェック・排他選択・プロファイル復元に加え、
 プロンプトのコンパイル（アンダースコア保護／カテゴリ整列）、翻訳、差分計算、トークン数概算、PNG Info取込、
-移動先クイック選択、ドラッグ&ドロップの移動確定などを対象とします。
-- **テストファイル:** `tests/store_prompt.spec.ts`
-- **テスト件数:** 約112件
+移動先クイック選択、ドラッグ&ドロップの移動確定、アイテムの追加・編集・複製・削除などを対象とします。
+- **テストファイル:**
+  - `tests/store_prompt.spec.ts` — ストアロジック全般
+  - `tests/groupMapUtils.spec.ts` — グループマップ集計
+  - `tests/generationFields.spec.ts` — 生成設定フィールドの読み書き
+- **テスト件数:** 203件
 - **実行コマンド:**
   ```bash
-  npm run test:unit
+  bun run test:unit
   ```
+- **補足:** テストランナーは `bun:test` を使用し、収集対象は `bunfig.toml` で `tests/` 配下に限定しています。`bun:test` の `vi` には `stubGlobal` / `unstubAllGlobals` が無いため、グローバル変数（`fetch` など）の差し替えには `tests/helpers/globals.ts` の `stubGlobal()` / `unstubAllGlobals()` を使用してください（`bun test` は全テストファイルを同一プロセスで実行するため、`afterEach` で必ず元に戻します）。
 
 ### 4.2 バックエンド単体テスト (pytest)
 Python APIエンドポイント、設定のI/O管理、YAMLの保存・読み込み仕様、翻訳プロバイダ、タグDBの判定をテストします。
 - **テストファイル:**
   - `tests/test_psm_extension.py` — API・設定・YAML永続化
+  - `tests/test_psm_cache.py` — 書き込みキャッシュのデバウンス動作
   - `tests/test_psm_translate.py` — 翻訳プロバイダ、応答サニタイズ、エラーマッピング
   - `tests/test_psm_tagdb.py` — タグDBのロード、カテゴリ変換、サブ分類判定
-- **テスト件数:** 約74件（`parametrize` 展開後はさらに増加）
+- **テスト件数:** 125件（`parametrize` 展開後）
 - **実行コマンド:**
   ```bash
-  pytest
+  ..\..\venv\Scripts\python -m pytest tests\
   ```
 
-### 4.3 E2Eテスト (Playwright)
-実際のブラウザを模してUIを操作し、セットアップウィザード、ドラッグ＆ドロップ、ショートカットキー、ウェイトスライダーやプロファイルのUI連動などを総合的にテストします。
-- **テストファイル:** `tests/design.spec.ts` など
-- **テスト件数:** 9件
-- **実行コマンド:**
-  ```bash
-  # ローカルのWebUIサーバーが起動した状態で実行してください（デフォルトは http://localhost:7860）
-  npx playwright test
-  ```
-- **一括実行スクリプト (Windowsローカル環境用):**
-  リポジトリ直下の `test_local.bat` を実行することで、依存関係インストールから Playwright の実行までを一括で行うことができます。
-  ```bash
-  .\test_local.bat
-  ```
+### 4.3 手動確認
+v1.6.0 で Playwright による E2E テストを廃止しました。見た目（色・枠線・レイアウト）、キーボード/マウス操作、プロンプト大辞典との連携などは、リリース前（およびUIに関わる変更を行った時）に [tests/TEST_SPEC.md の手動確認チェックリスト](../tests/TEST_SPEC.md#23-手動確認チェックリスト) に沿って確認してください。
+1. `bun run build` を実行する
+2. WebUI をリロードする（Python 側に変更が無ければ再起動は不要）
+3. チェックリストの項目を順に確認する
+
+### 4.4 Node.js 非依存の確認
+Node.js が入ったマシンでも Bun だけで開発できることを確認するには、PowerShell で一時的に PATH から Node.js を外してから実行します（そのウィンドウ内だけの変更で、他のターミナルには影響しません）。
+```powershell
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'nodejs|volta' }) -join ';'
+node --version  # 見つからないことを確認
+bun install; bun run build; bun run test:unit
+```
+スクリプトの `--bun` 指定が漏れていると、`node` が見つからずにエラーになります。
 
 ## 5. デバッグ
 ブラウザのコンソールで `[PSM]` でフィルタリングすることで、本拡張機能のログのみを抽出できます。

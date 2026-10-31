@@ -31,7 +31,7 @@ const mockLocalStorage = {
 const mockSendBeacon = vi.fn();
 
 /**
- * グローバル fetch の差し替え先 (vitest の fetchMock の代わりに直接参照する)。
+ * グローバル fetch の差し替え先 (vitest の vi.mocked(fetch) の代わりに直接参照する)。
  * テストごとに作り直すため、各テストからは beforeEach 後の最新のモックを参照する
  */
 let fetchMock = vi.fn<typeof fetch>();

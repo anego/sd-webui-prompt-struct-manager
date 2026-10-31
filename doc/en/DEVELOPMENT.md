@@ -3,30 +3,29 @@
 ## 1. Build Environment Setup
 
 ### Requirements
-- Node.js (v18 or higher recommended)
-- npm
+- [Bun](https://bun.com/) (1.3 or higher; install on Windows with `scoop install bun`). Node.js is not required.
 
 ### Installation
 ```bash
 cd extensions/sd-webui-prompt-struct-manager
-npm install
+bun install
 ```
 
 ## 2. Build Process
 
 ### Production Build
 ```bash
-npm run build
+bun run build
 ```
 This command internally executes the following steps:
-1. `node scripts/embed_font.js`: Converts MDI font to Base64 and generates CSS (`src/mdi-embedded.css`).
-2. `vite build`: Builds the Vue application and outputs to `dist/` directory.
+1. `bun scripts/embed_font.js`: Converts MDI font to Base64 and generates CSS (`src/mdi-embedded.css`).
+2. `bun --bun vite build`: Builds the Vue application and outputs to `dist/` directory.
 
-### Development Server
+### Watch Build
 ```bash
-npm run dev
+bun run dev
 ```
-*Note: To verify integration with WebUI, build files usually need to be in place. Use `npm run build -- --watch` or set up a hot-reload environment.*
+*Note: Rebuilds into `dist/` when sources change. Reload the WebUI to see the changes.*
 
 ## 3. Directory Structure & Key Files
 
@@ -42,10 +41,10 @@ Unified Logger module.
 - `Logger.debug()`: Output only if `state.isDevMode` is `true`.
 - Automatically adds `[PSM]` prefix.
 
-## 4. Testing (E2E)
-E2E testing environment using Playwright is configured.
+## 4. Testing
+Unit tests run with `bun test`. Playwright E2E tests were removed in v1.6.0 and replaced by manual checks (see [tests/TEST_SPEC_en.md](../../tests/TEST_SPEC_en.md)).
 ```bash
-npx playwright test
+bun run test:unit
 ```
 
 ## 5. Debugging

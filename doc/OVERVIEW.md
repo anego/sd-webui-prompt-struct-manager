@@ -51,10 +51,11 @@ extensions/sd-webui-prompt-struct-manager/
 │   ├── dragOptions.ts  # ドラッグ&ドロップ (SortableJS) の共通オプション
 │   ├── log.ts          # ログ管理
 │   └── types.ts        # 型定義
-├── tests/              # 自動テスト (Vitest / pytest / Playwright)
+├── tests/              # 自動テスト (bun test / pytest) と手動確認チェックリスト (TEST_SPEC.md)
 ├── dist/               # ビルド成果物 (index.js)
 ├── CHANGELOG.md        # 変更履歴
 ├── vite.config.ts      # Vite設定
+├── bunfig.toml         # Bun設定 (テストの収集対象)
 └── package.json        # 依存関係定義
 ```
 

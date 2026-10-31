@@ -51,10 +51,11 @@ extensions/sd-webui-prompt-struct-manager/
 │   ├── dragOptions.ts  # Shared drag & drop (SortableJS) options
 │   ├── log.ts          # Logger
 │   └── types.ts        # Type Definitions
-├── tests/              # Automated tests (Vitest / pytest / Playwright)
+├── tests/              # Automated tests (bun test / pytest) and the manual verification checklist (TEST_SPEC_en.md)
 ├── dist/               # Build Artifacts (index.js)
 ├── CHANGELOG.md        # Changelog
 ├── vite.config.ts      # Vite Config
+├── bunfig.toml         # Bun config (test collection scope)
 └── package.json        # Dependencies
 ```
 

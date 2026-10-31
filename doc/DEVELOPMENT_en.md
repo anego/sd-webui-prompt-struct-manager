@@ -3,30 +3,48 @@
 ## 1. Build Environment Setup
 
 ### Requirements
-- Node.js (v24 or higher recommended, locked to v24.13.0 via Volta)
-- npm
+- [Bun](https://bun.com/) (1.3 or higher)
+  - Bun handles package management, builds, and unit tests. Node.js is not required.
+- Python (the SD WebUI venv) — only needed to run the backend tests
 
-### Installation
+### Installing Bun (Windows)
+Install it with [Scoop](https://scoop.sh/):
+```bash
+scoop install bun
+bun --version
+```
+Update it through Scoop as well (do not use `bun upgrade`, which updates outside Scoop's management):
+```bash
+scoop update bun
+```
+
+### Installing Dependencies
 ```bash
 cd extensions/sd-webui-prompt-struct-manager
-npm install
+bun install
 ```
+Versions are locked in `bun.lock`.
 
 ## 2. Build Process
 
 ### Production Build
 ```bash
-npm run build
+bun run build
 ```
 This command internally executes the following steps:
-1. `node scripts/embed_font.js`: Converts MDI font to Base64 and generates CSS (`src/mdi-embedded.css`).
-2. `vite build`: Builds the Vue application and outputs to `dist/` directory.
+1. `bun scripts/embed_font.js`: Converts MDI font to Base64 and generates CSS (`src/mdi-embedded.css`).
+2. `bun --bun vite build`: Builds the Vue application and outputs to `dist/` directory.
 
-### Development Server
+The build output (`dist/index.js`) is committed to the repository. The WebUI only loads this file, so end users need neither Bun nor Node.js.
+
+### Watch Build
 ```bash
-npm run dev
+bun run dev
 ```
-*Note: To verify integration with WebUI, build files usually need to be in place. Use `npm run build -- --watch` or set up a hot-reload environment.*
+Rebuilds into `dist/` when sources change. Reload the WebUI to see the changes.
+
+### About the `--bun` Flag
+The `package.json` scripts invoke `vite` as `bun --bun vite ...`. On a machine with Node.js installed, omitting `--bun` makes Bun follow the `#!/usr/bin/env node` shebang at the top of `vite` and run it with Node.js. When adding scripts or tools, make sure they do not run on Node.js (see "4.4 Verifying Node.js Independence").
 
 ## 3. Directory Structure & Key Files
 
@@ -62,45 +80,50 @@ Tag DB lookup and subcategory classification.
 
 ## 4. Automated Testing
 
-To ensure quality and reliability, this project utilizes a 3-layered automated test suite consisting of frontend unit tests (Vitest), backend unit tests (pytest), and end-to-end browser tests (Playwright).
+This project covers logic with two automated test suites, frontend unit tests (`bun test`) and backend unit tests (pytest), and covers screen rendering and interaction with manual checks before each release. See [tests/TEST_SPEC_en.md](../tests/TEST_SPEC_en.md) for details.
 
-### 4.1 Frontend Unit Tests (Vitest)
+### 4.1 Frontend Unit Tests (`bun test`)
 Tests frontend store logic (`store.ts`): state management, duplicate detection, exclusive selection, profile snapshots,
 prompt compilation (underscore protection / category ordering), translation, diffing, token estimation,
-PNG Info import, quick move-to, and drag & drop move finalization.
-- **Test file:** `tests/store_prompt.spec.ts`
-- **Total Tests:** ~112
+PNG Info import, quick move-to, drag & drop move finalization, and adding/editing/duplicating/deleting items.
+- **Test files:**
+  - `tests/store_prompt.spec.ts` — store logic in general
+  - `tests/groupMapUtils.spec.ts` — group map aggregation
+  - `tests/generationFields.spec.ts` — reading/applying generation setting fields
+- **Total Tests:** 203
 - **Command:**
   ```bash
-  npm run test:unit
+  bun run test:unit
   ```
+- **Note:** The runner is `bun:test`, and test collection is limited to `tests/` via `bunfig.toml`. Since `vi` in `bun:test` has no `stubGlobal` / `unstubAllGlobals`, use `stubGlobal()` / `unstubAllGlobals()` from `tests/helpers/globals.ts` to replace globals such as `fetch` (`bun test` runs all test files in a single process, so always restore them in `afterEach`).
 
 ### 4.2 Backend Unit Tests (pytest)
 Tests Python API endpoints, configuration file I/O, YAML storage schemas, translation providers, and tag DB classification.
 - **Test files:**
   - `tests/test_psm_extension.py` — API, config, YAML persistence
+  - `tests/test_psm_cache.py` — write cache debounce behavior
   - `tests/test_psm_translate.py` — translation providers, response sanitization, error mapping
   - `tests/test_psm_tagdb.py` — tag DB loading, category mapping, subcategory rules
-- **Total Tests:** ~74 (more after `parametrize` expansion)
+- **Total Tests:** 125 (after `parametrize` expansion)
 - **Command:**
   ```bash
-  pytest
+  ..\..\venv\Scripts\python -m pytest tests\
   ```
 
-### 4.3 E2E Tests (Playwright)
-Simulates user interaction in a real browser to verify the Setup Wizard, drag & drop, keyboard shortcuts, weight sliders, and profile UI states.
-- **Test file:** `tests/design.spec.ts` etc.
-- **Total Tests:** 9 passed
-- **Command:**
-  ```bash
-  # Ensure the WebUI server is running locally (default: http://localhost:7860)
-  npx playwright test
-  ```
-- **Local Test Script (Windows):**
-  You can run `test_local.bat` in the root folder to install dependencies and run Playwright tests in one go.
-  ```bash
-  .\test_local.bat
-  ```
+### 4.3 Manual Checks
+Playwright E2E tests were removed in v1.6.0. Appearance (colors, borders, layout), keyboard/mouse interactions, and Prompt Dictionary integration are checked before each release (and after any UI-related change) following the [manual verification checklist in tests/TEST_SPEC_en.md](../tests/TEST_SPEC_en.md#23-manual-verification-checklist).
+1. Run `bun run build`
+2. Reload the WebUI (no restart is needed if nothing changed on the Python side)
+3. Go through the checklist items in order
+
+### 4.4 Verifying Node.js Independence
+To confirm that development works with Bun alone on a machine that has Node.js installed, temporarily remove Node.js from PATH in PowerShell before running the commands (this only affects that window, not other terminals):
+```powershell
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'nodejs|volta' }) -join ';'
+node --version  # make sure it is not found
+bun install; bun run build; bun run test:unit
+```
+If a script is missing the `--bun` flag, it fails because `node` cannot be found.
 
 ## 5. Debugging
 Filter by `[PSM]` in the browser console to isolate extension logs.
