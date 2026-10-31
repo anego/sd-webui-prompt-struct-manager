@@ -10,7 +10,7 @@
     "@mdi/font": "^7.4.47",
     "sass": "^1.97.3",
     "sortablejs": "^1.15.0",
-    "vue": "^3.5.35",
+    "vue": "^3.5.44",
     "vuedraggable": "^4.1.0",
     "vuetify": "^4.0.8"
   },
@@ -24,6 +24,9 @@
   },
   "overrides": {
     "immutable": ">=5.1.9",
-    "picomatch": ">=4.0.5"
+    "picomatch": ">=4.0.5",
+    "postcss": "^8.5.23",
+    "nanoid": "^3.3.18",
+    "source-map-js": "^1.2.2"
   }
 }
