@@ -1,0 +1,3 @@
+[test]
+# 単体テストの収集対象を tests/ 配下に限定する (*.spec.ts / *.test.ts が対象)
+root = "tests"

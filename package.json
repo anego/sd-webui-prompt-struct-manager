@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "bun --bun vite build --watch",
     "build": "bun scripts/embed_font.js && bun --bun vite build",
-    "test:unit": "vitest run"
+    "test:unit": "bun test"
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",
@@ -16,12 +16,12 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "@types/bun": "^1.4.4",
     "@vitejs/plugin-vue": "^5.0.0",
     "typescript": "^5.0.0",
     "vite": "^8.0.16",
     "vite-plugin-css-injected-by-js": "^3.3.0",
-    "vite-plugin-vuetify": "^2.1.3",
-    "vitest": "^4.1.7"
+    "vite-plugin-vuetify": "^2.1.3"
   },
   "overrides": {
     "immutable": ">=5.1.9",

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "bun:test";
 import { toRaw } from "vue";
+import { stubGlobal, unstubAllGlobals } from "./helpers/globals";
 import {
   state,
   getCompiledPrompts,
@@ -18,8 +19,8 @@ import { PsmItem } from "../src/types";
 // -------------------------------------------------------------------------
 // テスト前処理とモック設定
 // -------------------------------------------------------------------------
-// Node環境にはブラウザの localStorage や document, fetch が存在しないため
-// テスト開始前にこれらをモックとしてグローバルにスタブ化します。
+// bun test の実行環境にはブラウザの localStorage や document が存在せず、
+// fetch / navigator も実物のため、テスト開始前にこれらをモックへ差し替えます。
 // -------------------------------------------------------------------------
 
 const mockLocalStorage = {
@@ -29,16 +30,23 @@ const mockLocalStorage = {
 
 const mockSendBeacon = vi.fn();
 
+/**
+ * グローバル fetch の差し替え先 (vitest の fetchMock の代わりに直接参照する)。
+ * テストごとに作り直すため、各テストからは beforeEach 後の最新のモックを参照する
+ */
+let fetchMock = vi.fn<typeof fetch>();
+
 beforeEach(() => {
   // グローバルモックの注入
-  vi.stubGlobal("localStorage", mockLocalStorage);
-  vi.stubGlobal("document", {
+  stubGlobal("localStorage", mockLocalStorage);
+  stubGlobal("document", {
     getElementById: vi.fn(),
     querySelector: vi.fn(),
   });
-  vi.stubGlobal("fetch", vi.fn());
-  vi.stubGlobal("navigator", { sendBeacon: mockSendBeacon });
-  
+  fetchMock = vi.fn<typeof fetch>();
+  stubGlobal("fetch", fetchMock);
+  stubGlobal("navigator", { sendBeacon: mockSendBeacon });
+
   // 各テスト間で状態が干渉しないように Piniaライクな状態オブジェクトをリセットします
   state.positive = [];
   state.negative = [];
@@ -47,8 +55,13 @@ beforeEach(() => {
   state.duplicateTexts.clear();
   state.modelMode = "sd";
   state.translateSettings = null;
-  
+
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  // bun test は全テストファイルを同一プロセスで実行するため、差し替えたグローバルを元に戻す
+  unstubAllGlobals();
 });
 
 // -------------------------------------------------------------------------
@@ -342,7 +355,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     state.negative = [{ id: 2, name: "n1", content: "lowres", enabled: true, weight: 1.0, is_group: false }];
 
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await savePrompts();
@@ -381,7 +394,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     };
 
     const mockResponse = { ok: true, json: async () => apiPayload };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await loadPrompts();
@@ -401,7 +414,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     state.modelMode = "sd";
     const apiPayload = { positive: [], negative: [], profiles: [], model_mode: "anima" };
     const mockResponse = { ok: true, json: async () => apiPayload };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await loadPrompts();
@@ -414,7 +427,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     // Arrange
     state.selectedFile = "mode_test.yaml";
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await setModelMode("anima");
@@ -430,7 +443,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
   it("3.4 createPromptFile: /psm/save-prompts に対して初期化データをPOSTし、作成後に再読み込みされること (拡張子省略時は.json)", async () => {
     // Arrange
     const mockResponse = { ok: true, json: async () => ({ status: "success", files: ["new_file.json"] }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await createPromptFile("new_file");
@@ -450,7 +463,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     // Arrange
     state.selectedFile = "current.yaml";
     const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act & Assert (複合ステップの検証)
     // 複製テストの Act
@@ -481,7 +494,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     // Arrange: 選択中ファイルが .json のケース
     state.selectedFile = "current.json";
     const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await duplicateCurrentFile("copy_without_ext");
@@ -506,7 +519,7 @@ describe("YAML 保存 & ファイル管理 API 連携", () => {
     // Arrange: 選択中は .json だが、複製先で明示的に .yaml を指定した場合
     state.selectedFile = "current.json";
     const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await duplicateCurrentFile("explicit_copy.yaml");
@@ -528,7 +541,7 @@ describe("convertCurrentFileToJson - 既存YAMLファイルのJSON変換", () =>
   it("19.1 選択中ファイルが .yaml の場合、/psm/convert-to-json を呼び、成功時は変換後のファイルを選択・再読み込みすること", async () => {
     // Arrange
     state.selectedFile = "legacy.yaml";
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/convert-to-json") {
         return { ok: true, json: async () => ({ status: "success", file: "legacy.json" }) } as Response;
       }
@@ -578,7 +591,7 @@ describe("convertCurrentFileToJson - 既存YAMLファイルのJSON変換", () =>
   it("19.4 変換に失敗した場合、選択中ファイルを変更しないこと", async () => {
     // Arrange
     state.selectedFile = "legacy.yaml";
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "error", message: "already exists" }),
     } as Response);
@@ -627,7 +640,7 @@ describe("カテゴリ内排他選択 (isExclusive)", () => {
     const parentChildren = parentGroup.children;
 
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act: c2 を有効化する
     await toggleItemEnabled(c2, parentChildren, parentGroup);
@@ -656,7 +669,7 @@ describe("カテゴリ内排他選択 (isExclusive)", () => {
     };
 
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act: isExclusive を ON にする
     await toggleGroupExclusive(group);
@@ -673,7 +686,7 @@ describe("カテゴリ内排他選択 (isExclusive)", () => {
     state.selectedFile = "dummy.yaml";
     const item: PsmItem = { id: 2, name: "c1", content: "A", enabled: true, weight: 1.5, is_group: false };
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await resetWeight(item);
@@ -739,7 +752,7 @@ describe("状態スナップショット「プロファイル」機能", () => {
     ];
     
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await saveProfile("MyProfile");
@@ -775,7 +788,7 @@ describe("状態スナップショット「プロファイル」機能", () => {
     ];
     
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await applyProfile("PresetA");
@@ -799,7 +812,7 @@ describe("状態スナップショット「プロファイル」機能", () => {
     state.selectedProfileName = "PresetA";
     
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await deleteProfile("PresetA");
@@ -916,7 +929,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
   it("12.16 番号付きリストで一括翻訳し、元の配列順に対応付けること", async () => {
     // Arrange
     state.translateSettings = defaultTranslateSettings();
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "success", text: "1. 女の子1人\n2. ロングヘア\n3. 笑顔" }),
     } as Response);
@@ -927,7 +940,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
     // Assert
     expect(names).toEqual(["女の子1人", "ロングヘア", "笑顔"]);
     // 英語→日本語用のシステムプロンプトと target_lang が送られること
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.config.target_lang).toBe("JA");
     expect(body.config.system_prompt).toContain("Japanese");
     expect(body.text).toBe("1. 1girl\n2. long hair\n3. smile");
@@ -937,7 +950,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
   it("12.17 番号が欠落・ズレた行は無視し、対応が取れた分のみ返すこと", async () => {
     // Arrange: 2番の行が欠落し、余計な説明行が混入したケース
     state.translateSettings = defaultTranslateSettings();
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "success", text: "Here you go:\n1. 女の子1人\n3. 笑顔" }),
     } as Response);
@@ -952,7 +965,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
   it("12.18 20件を超える場合は複数リクエストに分割すること", async () => {
     // Arrange
     state.translateSettings = defaultTranslateSettings();
-    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+    fetchMock.mockImplementation(async (_url, init) => {
       const body = JSON.parse((init as RequestInit).body as string);
       const lines = body.text.split("\n").map((l: string) => {
         const n = l.match(/^(\d+)\./)![1];
@@ -966,7 +979,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
     const names = await translateTagNames(tags);
 
     // Assert: 20+20+5 = 3リクエスト
-    expect(vi.mocked(fetch).mock.calls.length).toBe(3);
+    expect(fetchMock.mock.calls.length).toBe(3);
     expect(names.length).toBe(45);
     expect(names.every((n) => n.startsWith("訳"))).toBe(true);
   });
@@ -984,7 +997,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
         children: [{ id: 6, name: "", content: "long hair", enabled: true, weight: 1, is_group: false }],
       },
     ];
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "success", text: "1. 女の子1人\n2. ロングヘア" }),
     } as Response);
@@ -993,7 +1006,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
     const applied = await applyTranslatedNames(items);
 
     // Assert: 対象は 1girl と (グループ配下の) long hair のみ
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.text).toBe("1. 1girl\n2. long hair");
     expect(applied).toBe(2);
     expect(items[0].name).toBe("女の子1人");
@@ -1010,7 +1023,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
     state.isLoading = false;
     state.loadingCount = 0;
     const seen: { isLoading: boolean; text: string }[] = [];
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       // 非同期処理の実行中の状態を記録する
       seen.push({ isLoading: state.isLoading, text: state.loadingText });
       if (String(url) === "/psm/translate") {
@@ -1041,7 +1054,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
     }];
     state.negative = [];
     let seenText = "";
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (!seenText) seenText = state.loadingText;
       if (String(url) === "/psm/tag-categories") {
         return { ok: true, json: async () => ({ status: "success", categories: { "1girl": "subject" } }) } as Response;
@@ -1062,7 +1075,7 @@ describe("translateTagNames / applyTranslatedNames - タグ名の日本語化", 
     // Arrange: 翻訳はエラー、保存は成功
     state.selectedFile = "target.yaml";
     state.translateSettings = defaultTranslateSettings();
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/translate") {
         return { ok: true, json: async () => ({ status: "error", message: "接続できません" }) } as Response;
       }
@@ -1085,7 +1098,7 @@ describe("importInfotext - 取込の適用", () => {
     state.selectedFile = "target.yaml";
     state.positive = [];
     state.negative = [];
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
 
     // Act
     const r = await importInfotext(SAMPLE_INFOTEXT);
@@ -1102,7 +1115,7 @@ describe("importInfotext - 取込の適用", () => {
   it("12.13 カテゴリ別グループ化を指定するとカテゴリ順のグループが生成されること", async () => {
     // Arrange
     state.selectedFile = "target.yaml";
-    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+    fetchMock.mockImplementation(async (url: RequestInfo | URL) => {
       if (String(url) === "/psm/tag-categories") {
         return {
           ok: true,
@@ -1128,7 +1141,7 @@ describe("importInfotext - 取込の適用", () => {
     // Arrange: 一般タグを8件以上 (しきい値) 用意する
     state.selectedFile = "target.yaml";
     const generalTags = ["long hair", "blue eyes", "smile", "school uniform", "thighhighs", "sitting", "outdoors", "flower"];
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/tag-categories") {
         return {
           ok: true,
@@ -1164,7 +1177,7 @@ describe("importInfotext - 取込の適用", () => {
   it("12.24 一般タグがしきい値未満の場合は細分化しないこと", async () => {
     // Arrange: 3件のみ
     state.selectedFile = "target.yaml";
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/tag-categories") {
         return {
           ok: true,
@@ -1189,7 +1202,7 @@ describe("importInfotext - 取込の適用", () => {
     // Arrange: 8件すべてサブ分類なし
     state.selectedFile = "target.yaml";
     const tags = Array.from({ length: 8 }, (_, i) => `tag${i}`);
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/tag-categories") {
         return {
           ok: true,
@@ -1213,7 +1226,7 @@ describe("importInfotext - 取込の適用", () => {
   it("12.14 タグDBが使えない場合はフラットな構成で取り込むこと (フォールバック)", async () => {
     // Arrange
     state.selectedFile = "target.yaml";
-    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+    fetchMock.mockImplementation(async (url: RequestInfo | URL) => {
       if (String(url) === "/psm/tag-categories") {
         return { ok: true, json: async () => ({ status: "error", message: "タグDBが見つかりません。" }) } as Response;
       }
@@ -1230,13 +1243,13 @@ describe("importInfotext - 取込の適用", () => {
 
   it("12.15 ファイル名指定時は新規ファイルとして保存されること (拡張子省略時は.json)", async () => {
     // Arrange
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success", files: [] }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success", files: [] }) } as Response);
 
     // Act
     await importInfotext("1girl, solo", { fileName: "from_png" });
 
     // Assert
-    const call = vi.mocked(fetch).mock.calls.find((c) => c[0] === "/psm/save-prompts");
+    const call = fetchMock.mock.calls.find((c) => c[0] === "/psm/save-prompts");
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body.file).toBe("from_png.json");
     expect(JSON.stringify(body.positive)).toContain("1girl");
@@ -1440,7 +1453,7 @@ describe("移動先クイック選択", () => {
   it("14.4 pushRecentMoveTarget: 先頭へ追加され、重複は繰り上げ、5件で打ち切られること", () => {
     // Arrange
     const mk = (id: number): MoveTarget => ({ id, name: `g${id}`, path: `P > g${id}`, list: [], level: 0 });
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
 
     // Act: 6件追加
     for (let i = 1; i <= 6; i++) pushRecentMoveTarget(mk(i));
@@ -1478,7 +1491,7 @@ describe("移動先クイック選択", () => {
     state.positive = [item, dest];
     state.negative = [];
     openMoveDialog(item);
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
 
     const target: MoveTarget = { id: 10, name: "移動先", path: "Positive > 移動先", list: dest.children!, level: 0 };
 
@@ -1530,7 +1543,7 @@ describe("サブ分類の任意実行とAI分類", () => {
 
   /** ルールベースAPIの応答を返すモック */
   const mockRuleApi = (subcategories: Record<string, string | null>) => {
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/tag-categories") {
         return { ok: true, json: async () => ({ status: "success", categories: {}, subcategories }) } as Response;
       }
@@ -1623,7 +1636,7 @@ describe("サブ分類の任意実行とAI分類", () => {
     await subdivideGroup(group);
 
     // Assert: 対象外アイテムは葉のまま残る (照会対象にも含まれない)
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.tags).not.toContain("<lora:foo:0.8>");
     expect(body.tags).not.toContain("A girl stands.");
     expect(group.children).toContain(nl);
@@ -1633,7 +1646,7 @@ describe("サブ分類の任意実行とAI分類", () => {
   it("13.5 classifyTagsWithAI: 番号付き応答をキーへ対応付け、不正なキーは無視すること", async () => {
     // Arrange
     state.translateSettings = defaultTranslateSettings();
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "success", text: "1. hair\n2. INVALID_KEY\n3. other\n4. clothing" }),
     } as Response);
@@ -1647,7 +1660,7 @@ describe("サブ分類の任意実行とAI分類", () => {
     expect(r["mystery tag c"]).toBeNull();
     expect(r["mystery tag d"]).toBe("clothing");
     // 分類用のシステムプロンプトが使われること
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.config.system_prompt).toContain("classify");
   });
 
@@ -1655,7 +1668,7 @@ describe("サブ分類の任意実行とAI分類", () => {
     // Arrange
     state.translateSettings = defaultTranslateSettings();
     const aiCalls: string[][] = [];
-    vi.mocked(fetch).mockImplementation(async (url, init) => {
+    fetchMock.mockImplementation(async (url, init) => {
       const body = JSON.parse((init as RequestInit).body as string);
       if (String(url) === "/psm/tag-categories") {
         return {
@@ -1684,7 +1697,7 @@ describe("サブ分類の任意実行とAI分類", () => {
   it("13.7 resolveSubcategories: AI失敗時はルールベースの結果のみ返すこと", async () => {
     // Arrange
     state.translateSettings = defaultTranslateSettings();
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (String(url) === "/psm/tag-categories") {
         return {
           ok: true,
@@ -1868,7 +1881,7 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
     const g = group("キャラ", [
       leaf("oomuro sakurako"), leaf("toshinou kyouko"), leaf("smile"),
     ]);
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
         status: "success",
@@ -1899,7 +1912,7 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
       leaf("<lora:foo:0.8>"),
       leaf("BREAK"),
     ]);
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "success", categories: { "1girl": "subject" } }),
     } as Response);
@@ -1908,7 +1921,7 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
     const s = await suggestCategoryForGroup(g);
 
     // Assert: 照会されたのは 1girl のみ
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.tags).toEqual(["1girl"]);
     expect(s.total).toBe(1);
     expect(s.suggested).toBe("subject");
@@ -1920,7 +1933,7 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
       leaf("masterpiece"),
       group("子", [leaf("best quality")]),
     ]);
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "success", categories: {} }),
     } as Response);
@@ -1929,14 +1942,14 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
     await suggestCategoryForGroup(g);
 
     // Assert
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.tags).toEqual(["masterpiece", "best quality"]);
   });
 
   it("10.4 suggestCategoryForGroup: タグDB未検出時はエラーメッセージ付きで例外を投げること", async () => {
     // Arrange
     const g = group("g", [leaf("1girl")]);
-    vi.mocked(fetch).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ status: "error", message: "タグDBが見つかりません。" }),
     } as Response);
@@ -1967,7 +1980,7 @@ describe("カテゴリ自動判定 (Phase 5B)", () => {
     ];
     state.negative = [];
 
-    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+    fetchMock.mockImplementation(async (url: RequestInfo | URL) => {
       if (String(url) === "/psm/tag-categories") {
         return {
           ok: true,
@@ -2100,13 +2113,13 @@ describe("カテゴリ整列とAnimaテンプレート (Phase 3)", () => {
   it("8.7 createPromptFile: テンプレート指定時に model_mode: anima と雛形が送信されること", async () => {
     // Arrange
     const mockResponse = { ok: true, json: async () => ({ status: "success", files: [] }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await createPromptFile("anima_new", true);
 
     // Assert
-    const call = vi.mocked(fetch).mock.calls.find(c => c[0] === "/psm/save-prompts");
+    const call = fetchMock.mock.calls.find(c => c[0] === "/psm/save-prompts");
     expect(call).toBeDefined();
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body.model_mode).toBe("anima");
@@ -2183,7 +2196,7 @@ describe("翻訳機能 (Phase 2.5)", () => {
     state.translateSettings = defaultTranslateSettings();
     state.translateSettings.active = "local";
     const mockResponse = { ok: true, json: async () => ({ status: "success", text: "A cat." }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     const result = await translateText("猫");
@@ -2201,7 +2214,7 @@ describe("翻訳機能 (Phase 2.5)", () => {
     // Arrange
     state.translateSettings = defaultTranslateSettings();
     const mockResponse = { ok: true, json: async () => ({ status: "error", message: "接続できません" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act & Assert
     await expect(translateText("猫")).rejects.toThrow("接続できません");
@@ -2255,7 +2268,7 @@ describe("非同期処理中のローディングインジケーター表示機�
         return { positive: [], negative: [], profiles: [] };
       }
     };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     await loadPrompts();
 
@@ -2286,7 +2299,7 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
       { name: "P1", fields: ["checkpoint"], settings: { checkpoint: "a.safetensors" }, updatedAt: "2026-08-01T00:00:00Z" },
     ];
     const mockResponse = { ok: true, json: async () => ({ profiles: savedProfiles }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await loadGenerationProfiles();
@@ -2298,7 +2311,7 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
 
   it("13.2 saveGenerationProfile: 選択したフィールドのみを現在のWebUI状態から保存すること", async () => {
     // Arrange
-    vi.stubGlobal("document", {
+    stubGlobal("document", {
       getElementById: vi.fn().mockReturnValue({ offsetParent: null }), // txt2img と判定させる
       querySelector: vi.fn().mockImplementation((sel: string) => {
         if (sel === "#setting_sd_model_checkpoint input") return { value: "modelA.safetensors" };
@@ -2307,7 +2320,7 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
       }),
     });
     const mockResponse = { ok: true, json: async () => ({ status: "success" }) };
-    vi.mocked(fetch).mockResolvedValue(mockResponse as Response);
+    fetchMock.mockResolvedValue(mockResponse as Response);
 
     // Act
     await saveGenerationProfile("MyGenProfile", ["checkpoint", "steps"]);
@@ -2325,13 +2338,13 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
     state.generationProfiles = [
       { name: "MyGenProfile", fields: ["steps"], settings: { steps: 10 }, updatedAt: "2026-01-01T00:00:00Z" },
     ];
-    vi.stubGlobal("document", {
+    stubGlobal("document", {
       getElementById: vi.fn().mockReturnValue({ offsetParent: null }),
       querySelector: vi.fn().mockImplementation((sel: string) =>
         sel === "#txt2img_steps input" ? { value: "40" } : null
       ),
     });
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
 
     // Act
     await saveGenerationProfile("MyGenProfile", ["steps"]);
@@ -2353,7 +2366,7 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     ];
-    vi.stubGlobal("document", {
+    stubGlobal("document", {
       getElementById: vi.fn().mockReturnValue({ offsetParent: null }), // txt2img
       querySelector: vi.fn().mockImplementation((sel: string) =>
         sel === "#txt2img_steps input" ? stepsInput : null
@@ -2384,7 +2397,7 @@ describe("生成設定プロファイル機能 (Phase 6)", () => {
       { name: "A", fields: [], settings: {}, updatedAt: "2026-01-01T00:00:00Z" },
       { name: "B", fields: [], settings: {}, updatedAt: "2026-01-01T00:00:00Z" },
     ];
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
 
     // Act
     await deleteGenerationProfile("A");
@@ -2435,7 +2448,7 @@ describe("グループロック機能 (Phase 7)", () => {
   };
 
   beforeEach(() => {
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
   });
 
   it("14.1 isItemLocked: 自身がロックされている場合はtrueを返すこと", () => {
@@ -2545,7 +2558,7 @@ import { toggleGroupHidden, toggleShowHiddenGroups } from "../src/store";
 describe("グループ非表示機能 (Phase 8)", () => {
   beforeEach(() => {
     state.showHiddenGroups = false;
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
   });
 
   const buildGroup = (isLocked = false): PsmItem => {
@@ -2689,7 +2702,7 @@ import { disableAllInPane } from "../src/store";
 
 describe("disableAllInPane: ペイン内の有効なプロンプトを一括で無効化する", () => {
   beforeEach(() => {
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
   });
 
   const leaf = (id: number, name: string, enabled = true, isLocked = false): PsmItem => ({
@@ -2762,7 +2775,7 @@ import { requestDisableAll, confirmDisableAll, cancelDisableAll } from "../src/s
 
 describe("一括無効化の確認フロー", () => {
   beforeEach(() => {
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
     state.selectedFile = "confirm.json";
     state.disableAllConfirm = null;
   });
@@ -2833,7 +2846,7 @@ describe("一括無効化の確認フロー", () => {
 
     // Act
     await confirmDisableAll();
-    vi.mocked(fetch).mockClear();
+    fetchMock.mockClear();
     await confirmDisableAll();
 
     // Assert
@@ -2848,7 +2861,7 @@ describe("一括無効化の確認フロー", () => {
 // タブを閉じる直前に sendBeacon で明示的にflushさせる必要がある。
 
 describe("flushPromptsOnUnload - タブを閉じる際の保存flush", () => {
-  it("18.1 選択中ファイルがある場合、sendBeacon で /psm/flush-prompts へ通知すること", () => {
+  it("18.1 選択中ファイルがある場合、sendBeacon で /psm/flush-prompts へ通知すること", async () => {
     // Arrange
     state.selectedFile = "current.yaml";
 
@@ -2860,7 +2873,9 @@ describe("flushPromptsOnUnload - タブを閉じる際の保存flush", () => {
     const [url, blob] = mockSendBeacon.mock.calls[0];
     expect(url).toBe("/psm/flush-prompts");
     expect(blob).toBeInstanceOf(Blob);
-    expect(blob.type).toBe("application/json");
+    // Bun の Blob は type に ";charset=utf-8" を付与する (ブラウザは付与しない) ため前方一致で判定する
+    expect(blob.type).toMatch(/^application\/json/);
+    expect(JSON.parse(await blob.text())).toEqual({ file: "current.yaml" });
   });
 
   it("18.2 選択中ファイルが無い場合は sendBeacon を呼ばないこと", () => {
@@ -2883,7 +2898,7 @@ describe("flushPromptsOnUnload - タブを閉じる際の保存flush", () => {
 
 describe("initializePsm - 起動時の初期化", () => {
   const mockServer = (isConfigured: boolean) => {
-    vi.mocked(fetch).mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       const u = String(url);
       if (u === "/psm/get-config") {
         return { ok: true, json: async () => ({ save_dir: "C:/psm", is_configured: isConfigured }) } as Response;
@@ -2901,7 +2916,7 @@ describe("initializePsm - 起動時の初期化", () => {
     });
   };
   const callsTo = (prefix: string) =>
-    vi.mocked(fetch).mock.calls.filter((c) => String(c[0]).startsWith(prefix));
+    fetchMock.mock.calls.filter((c) => String(c[0]).startsWith(prefix));
 
   it("20.1 前回選択ファイルがある場合、get-prompts は1回だけ実行されること", async () => {
     // Arrange

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "bun:test";
+import { stubGlobal, unstubAllGlobals } from "./helpers/globals";
 import {
   GENERATION_FIELDS,
   getActiveTabPrefix,
@@ -9,7 +10,7 @@ import {
 // -------------------------------------------------------------------------
 // テスト前処理とモック設定
 // -------------------------------------------------------------------------
-// vitest.config.ts は environment: "node" のため実DOMが存在しない。
+// bun test の実行環境には実DOMが存在しない。
 // document.getElementById / querySelector をテストごとに差し替えて検証する。
 // -------------------------------------------------------------------------
 
@@ -19,11 +20,18 @@ let querySelectorMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   getElementByIdMock = vi.fn().mockReturnValue(null);
   querySelectorMock = vi.fn().mockReturnValue(null);
-  vi.stubGlobal("document", {
+  stubGlobal("document", {
     getElementById: getElementByIdMock,
     querySelector: querySelectorMock,
   });
   vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  // bun test は全テストファイルを同一プロセスで実行するため、
+  // 差し替えたグローバルと console.warn のスパイを元に戻し、他ファイルへの漏れを防ぐ
+  unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 // -------------------------------------------------------------------------
