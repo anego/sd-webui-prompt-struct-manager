@@ -29579,8 +29579,8 @@ var mL = Y({
 							G(ET, { class: "text-subtitle-1 font-weight-bold text-orange" }, {
 								default: L(() => [
 									H(" 📂 " + M(F(t)("appName")) + " ", 1),
-									V("span", gL, "v" + M(F("1.5.1")), 1),
-									F(q).isDevMode ? (z(), B("span", _L, " (" + M(F("2026/10/31 10:32:57")) + ") ", 1)) : So("", !0)
+									V("span", gL, "v" + M(F("1.6.0")), 1),
+									F(q).isDevMode ? (z(), B("span", _L, " (" + M(F("2026/10/31 11:34:54")) + ") ", 1)) : So("", !0)
 								]),
 								_: 1
 							}),
@@ -30199,7 +30199,7 @@ function FL(e) {
 	let t = this.$, n = t.parent?.provides ?? t.vnode.appContext?.provides;
 	if (n && e in n) return n[e];
 }
-window.process === void 0 && (window.process = { env: { NODE_ENV: "production" } }), console.info("[PSM] メインスクリプト (main.ts) が正常に読み込まれました。ビルド日時: 2026/10/31 10:32:57");
+window.process === void 0 && (window.process = { env: { NODE_ENV: "production" } }), console.info("[PSM] メインスクリプト (main.ts) が正常に読み込まれました。ビルド日時: 2026/10/31 11:34:54");
 var IL = PL({
 	icons: {
 		defaultSet: "mdi",
