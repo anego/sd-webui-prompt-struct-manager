@@ -2,8 +2,8 @@
   "name": "sd-webui-psm",
   "version": "1.5.1",
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "node scripts/embed_font.js && vite build",
+    "dev": "bun --bun vite build --watch",
+    "build": "bun scripts/embed_font.js && bun --bun vite build",
     "test:unit": "vitest run"
   },
   "dependencies": {
