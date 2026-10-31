@@ -398,5 +398,3 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,windows,visualstudiocode,node,vuejs
 
 config.json
-playwright-report/
-test-results/

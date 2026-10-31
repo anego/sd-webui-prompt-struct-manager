@@ -2972,3 +2972,303 @@ describe("initializePsm - 起動時の初期化", () => {
     expect(state.selectedFile).toBe("");
   });
 });
+
+// -------------------------------------------------------------------------
+// 21. 廃止した E2E (Playwright) から移管したロジックの検証
+// -------------------------------------------------------------------------
+// E2E で画面操作として検証していた内容のうち、UI を介さずストアの関数で検証できる部分。
+// (アイテムの追加・編集・複製・削除、グループ内一括有効/無効、重複チェックモード切替)
+// 画面上の見た目や操作感は tests/TEST_SPEC.md の手動確認チェックリストで確認する。
+import {
+  startEdit,
+  finishEdit,
+  cancelEdit,
+  startDeleteConfirm,
+  cancelDelete,
+  setGroupChildrenEnabled,
+  setDuplicateCheckMode,
+} from "../src/store";
+
+describe("E2E から移管: アイテムの追加・編集・複製・削除", () => {
+  const leaf = (id: number, name: string, content = "tag", enabled = true): PsmItem => ({
+    id, name, content, enabled, weight: 1.0, memo: "", is_group: false,
+  });
+  const grp = (id: number, name: string, children: PsmItem[], isLocked = false): PsmItem => ({
+    id, name, content: "", enabled: true, weight: 1.0, is_group: true, isOpen: true, isLocked, children,
+  });
+  const saveCalls = () => fetchMock.mock.calls.filter((c) => c[0] === "/psm/save-prompts");
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    state.selectedFile = "edit.json";
+    state.isEditing = false;
+    state.isNewItem = false;
+    state.editingItem = null;
+    cancelDelete();
+  });
+
+  it("21.1 addItem: プロンプトを末尾に追加し、新規アイテムとして編集を開始すること", () => {
+    // Arrange
+    state.positive = [leaf(1, "既存")];
+
+    // Act
+    addItem(state.positive, false);
+
+    // Assert
+    expect(state.positive).toHaveLength(2);
+    const added = state.positive[1];
+    expect(added.is_group).toBe(false);
+    expect(added.children).toBeUndefined();
+    expect(added.enabled).toBe(true);
+    expect(added.weight).toBe(1.0);
+    expect(state.isEditing).toBe(true);
+    expect(state.isNewItem).toBe(true);
+    expect(state.editingItem?.id).toBe(added.id);
+  });
+
+  it("21.2 addItem: グループを作成すると子リストが空配列で用意されること", () => {
+    // Arrange
+    state.positive = [];
+
+    // Act
+    addItem(state.positive, true);
+
+    // Assert
+    expect(state.positive[0].is_group).toBe(true);
+    expect(state.positive[0].children).toEqual([]);
+  });
+
+  it("21.3 addItem: 位置を指定するとその位置に挿入されること", () => {
+    // Arrange
+    state.positive = [leaf(1, "a"), leaf(2, "b")];
+
+    // Act
+    addItem(state.positive, false, 1);
+
+    // Assert
+    expect(state.positive.map((i) => i.name)).toEqual(["a", "", "b"]);
+  });
+
+  it("21.4 finishEdit: 編集内容がツリーの該当アイテムへ反映され、保存されて編集モーダルが閉じること", async () => {
+    // Arrange
+    state.positive = [leaf(1, "旧名", "old")];
+    startEdit(state.positive[0]);
+    state.editingItem!.name = "新名";
+    state.editingItem!.content = "new";
+
+    // Act
+    await finishEdit();
+
+    // Assert
+    expect(state.positive[0].name).toBe("新名");
+    expect(state.positive[0].content).toBe("new");
+    expect(state.isEditing).toBe(false);
+    expect(saveCalls()).toHaveLength(1);
+  });
+
+  it("21.5 finishEdit: Negative 側の入れ子グループ内のアイテムも更新されること", async () => {
+    // Arrange
+    state.positive = [];
+    state.negative = [grp(10, "g", [grp(11, "inner", [leaf(12, "子", "x")])])];
+    startEdit(state.negative[0].children![0].children![0]);
+    state.editingItem!.content = "updated";
+
+    // Act
+    await finishEdit();
+
+    // Assert
+    expect(state.negative[0].children![0].children![0].content).toBe("updated");
+  });
+
+  it("21.6 finishEdit: 括弧を含む内容はエスケープされず入力どおりに保存されること (エスケープはコンパイル時のみ)", async () => {
+    // Arrange
+    state.positive = [leaf(1, "esc", "")];
+    startEdit(state.positive[0]);
+    state.editingItem!.content = "test (escape)";
+
+    // Act
+    await finishEdit();
+
+    // Assert
+    expect(state.positive[0].content).toBe("test (escape)");
+    const body = JSON.parse(saveCalls()[0][1]!.body as string);
+    expect(body.positive[0].content).toBe("test (escape)");
+  });
+
+  it("21.7 startEdit: 確定前は編集中のコピーを変更してもツリーへ反映されないこと", () => {
+    // Arrange
+    state.positive = [leaf(1, "元の名前")];
+
+    // Act
+    startEdit(state.positive[0]);
+    state.editingItem!.name = "編集中";
+
+    // Assert
+    expect(state.positive[0].name).toBe("元の名前");
+    expect(state.isNewItem).toBe(false);
+  });
+
+  it("21.8 cancelEdit: 新規追加の編集をキャンセルすると、追加した空のアイテムが取り除かれること", () => {
+    // Arrange
+    state.positive = [leaf(1, "既存")];
+    addItem(state.positive, false);
+
+    // Act
+    cancelEdit();
+
+    // Assert
+    expect(state.positive.map((i) => i.id)).toEqual([1]);
+    expect(state.isEditing).toBe(false);
+  });
+
+  it("21.9 cancelEdit: 既存アイテムの編集をキャンセルしても、アイテムは残り内容も変わらないこと", () => {
+    // Arrange
+    state.positive = [leaf(1, "既存", "keep")];
+    startEdit(state.positive[0]);
+    state.editingItem!.content = "changed";
+
+    // Act
+    cancelEdit();
+
+    // Assert
+    expect(state.positive).toHaveLength(1);
+    expect(state.positive[0].content).toBe("keep");
+  });
+
+  it("21.10 duplicateItem: 直後に複製され、名前に (copy) が付き、新しいIDが振られること", async () => {
+    // Arrange
+    state.positive = [leaf(1, "元"), leaf(2, "後ろ")];
+
+    // Act
+    await duplicateItem(state.positive[0], state.positive);
+
+    // Assert
+    expect(state.positive.map((i) => i.name)).toEqual(["元", "元 (copy)", "後ろ"]);
+    expect(state.positive[1].id).not.toBe(1);
+    expect(saveCalls()).toHaveLength(1);
+  });
+
+  it("21.11 duplicateItem: グループは子孫ごと複製され、子孫にも新しいIDが振られ、元と独立していること", async () => {
+    // Arrange
+    state.positive = [grp(1, "G", [leaf(2, "子")])];
+
+    // Act
+    await duplicateItem(state.positive[0], state.positive);
+    state.positive[1].children![0].name = "複製側だけ変更";
+
+    // Assert
+    expect(state.positive[1].name).toBe("G (copy)");
+    expect(state.positive[1].children![0].id).not.toBe(2);
+    expect(state.positive[0].children![0].name).toBe("子");
+  });
+
+  it("21.12 削除確認→実行: アイテムが削除・保存され、削除確認の状態が解除されること", async () => {
+    // Arrange
+    state.positive = [leaf(1, "消す"), leaf(2, "残す")];
+    startDeleteConfirm(state.positive[0], state.positive);
+    expect(state.isDeleting).toBe(true);
+
+    // Act
+    await deleteItemFromTree(state.deletingItem!, "all");
+
+    // Assert
+    expect(state.positive.map((i) => i.id)).toEqual([2]);
+    expect(state.isDeleting).toBe(false);
+    expect(state.deletingItem).toBeNull();
+    expect(saveCalls()).toHaveLength(1);
+  });
+
+  it("21.13 削除確認→キャンセル: アイテムは残り、保存も行われないこと", () => {
+    // Arrange
+    state.positive = [leaf(1, "残る")];
+    startDeleteConfirm(state.positive[0], state.positive);
+
+    // Act
+    cancelDelete();
+
+    // Assert
+    expect(state.positive).toHaveLength(1);
+    expect(state.isDeleting).toBe(false);
+    expect(state.deletingItem).toBeNull();
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it("21.14 グループ枠のみ削除: 子要素は親リストの同じ位置へ昇格すること", async () => {
+    // Arrange
+    state.positive = [leaf(1, "前"), grp(2, "枠", [leaf(3, "子A"), leaf(4, "子B")]), leaf(5, "後")];
+
+    // Act
+    await deleteItemFromTree(state.positive[1], "only");
+
+    // Assert
+    expect(state.positive.map((i) => i.name)).toEqual(["前", "子A", "子B", "後"]);
+  });
+});
+
+describe("E2E から移管: グループ内一括有効/無効・重複チェックモード", () => {
+  const leaf = (id: number, enabled = true): PsmItem => ({
+    id, name: `n${id}`, content: "tag", enabled, weight: 1.0, is_group: false,
+  });
+  const grp = (id: number, children: PsmItem[], isLocked = false): PsmItem => ({
+    id, name: `g${id}`, content: "", enabled: true, weight: 1.0, is_group: true, isOpen: true, isLocked, children,
+  });
+  const saveCalls = () => fetchMock.mock.calls.filter((c) => c[0] === "/psm/save-prompts");
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    state.selectedFile = "bulk.json";
+  });
+
+  it("21.15 setGroupChildrenEnabled: グループ配下(入れ子を含む)をすべて無効化・有効化でき、保存されること", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2), grp(3, [leaf(4)])])];
+    const group = state.positive[0];
+
+    // Act: 一括無効化
+    await setGroupChildrenEnabled(group, false);
+
+    // Assert
+    expect(group.children![0].enabled).toBe(false);
+    expect(group.children![1].enabled).toBe(false);
+    expect(group.children![1].children![0].enabled).toBe(false);
+    expect(group.enabled).toBe(true); // グループ自身の有効状態は変えない
+
+    // Act: 一括有効化
+    await setGroupChildrenEnabled(group, true);
+
+    // Assert
+    expect(group.children![0].enabled).toBe(true);
+    expect(group.children![1].children![0].enabled).toBe(true);
+    expect(saveCalls()).toHaveLength(2);
+  });
+
+  it("21.16 setGroupChildrenEnabled: ロック中のグループは変更されず、保存も行われないこと", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, true)], true)];
+
+    // Act
+    await setGroupChildrenEnabled(state.positive[0], false);
+
+    // Assert
+    expect(state.positive[0].children![0].enabled).toBe(true);
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it("21.17 setDuplicateCheckMode: モードが切り替わり、ローカル設定に保存され、既存の重複ハイライトが消えること", async () => {
+    // Arrange
+    state.duplicateTexts.add("1girl");
+    state.duplicateHighlightLevel = "warn";
+
+    // Act
+    await setDuplicateCheckMode("error");
+
+    // Assert
+    expect(state.duplicateCheckMode).toBe("error");
+    expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+      "psm_settings",
+      expect.stringContaining('"duplicate_check_mode":"error"')
+    );
+    expect(state.duplicateTexts.size).toBe(0);
+    expect(state.duplicateHighlightLevel).toBeNull();
+  });
+});
