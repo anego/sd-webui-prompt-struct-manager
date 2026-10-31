@@ -8,7 +8,7 @@ console.info(`[PSM] メインスクリプト (main.ts) が正常に読み込ま�
 
 import { createApp } from "vue";
 import App from "./App.vue";
-import { state, listFiles, loadPrompts, loadConfig, flushPromptsOnUnload } from "./store";
+import { state, flushPromptsOnUnload } from "./store";
 import { Logger } from "./log";
 
 // Vuetify
@@ -69,12 +69,8 @@ const mountPsmApp = async () => {
     // タブを閉じる/リロードする際、サーバー側のデバウンス待ちの保存を確実にflushする
     window.addEventListener("beforeunload", flushPromptsOnUnload);
     window.addEventListener("pagehide", flushPromptsOnUnload);
-
-    await loadConfig();
-    if (state.isConfigured) {
-      await listFiles();
-      await loadPrompts();
-    }
+    // 設定・ファイル一覧・プロンプトの初期読み込みは App.vue の onMounted (initializePsm) が担う。
+    // ここでも行うと get-prompts が重複実行されるため行わない
   } catch (e) {
     Logger.error("[Initialize] アプリケーションの初期化処理中に致命的なエラーが発生しました。", e);
   }

@@ -2,14 +2,13 @@
 import { ref, watch, onMounted, onUnmounted, provide, computed } from "vue";
 import {
   state,
-  loadPrompts,
-  loadGenerationProfiles,
+  initializePsm,
+  cancelDisableAll,
   listFiles,
   getCompiledPrompts,
   savePrompts,
   addItem,
   deleteCurrentFile,
-  loadConfig,
   saveConfig,
   pickDirectory,
   setAllGroupsOpen,
@@ -35,6 +34,7 @@ import PsmFileDialogs from "./components/PsmFileDialogs.vue";
 import PsmContextMenu from "./components/PsmContextMenu.vue";
 import PsmGroupMap from "./components/PsmGroupMap.vue";
 import PsmGenerateConfirmDialog from "./components/PsmGenerateConfirmDialog.vue";
+import PsmDisableAllConfirmDialog from "./components/PsmDisableAllConfirmDialog.vue";
 import PsmDuplicateConfirmDialog from "./components/PsmDuplicateConfirmDialog.vue";
 import PsmSetupWizard from "./components/PsmSetupWizard.vue";
 import PsmPreviewModal from "./components/PsmPreviewModal.vue";
@@ -384,12 +384,7 @@ const handleDictionaryInsertIntercept = (event: MouseEvent) => {
 onMounted(async () => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
   window.addEventListener("click", handleDictionaryInsertIntercept, true);
-  await loadConfig();
-  if (state.isConfigured) {
-    await listFiles();
-    await loadPrompts();
-    await loadGenerationProfiles();
-  }
+  await initializePsm();
 });
 
 // v-show化に伴い、表示時にファイルリストを最新化する
@@ -515,6 +510,10 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     }
     if (dialogs.value.generate) {
       dialogs.value.generate = false;
+      return;
+    }
+    if (state.disableAllConfirm) {
+      cancelDisableAll();
       return;
     }
     if (duplicateDialog.value.show) {
@@ -850,6 +849,8 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         v-model="dialogs.generate"
         @confirm="executeGenerate"
       />
+
+      <PsmDisableAllConfirmDialog />
       
       <!-- 操作不可のローディングオーバーレイ
            モーダルと同じ階層 (#psm_vue_app_overlay) へTeleportしないと、

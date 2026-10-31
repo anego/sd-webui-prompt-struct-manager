@@ -86,6 +86,8 @@ export const en = {
   hideGroupAction: "Hide",
   showGroupAction: "Unhide",
   disableAllInPane: "Disable All Enabled Prompts in This Pane",
+  disableAllConfirmTitle: "Confirm Bulk Disable",
+  disableAllConfirmMessage: "Disable all prompts in the \"{name}\" pane? Locked items are excluded.",
 
   enableAll: "Enable All in Group",
   disableAll: "Disable All in Group",

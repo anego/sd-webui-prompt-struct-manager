@@ -12,3 +12,5 @@
   => 必須読込: `.claude/rules/testing.md`
 - **`.vue` および `.ts` および `.d.ts` を編集する場合**
   => 必須読込: `.claude\rules\javascript-log.md`
+
+コードを作成、修正した場合は**必ずテストコードを作成、または修正してテスト実施する。**

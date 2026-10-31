@@ -134,6 +134,7 @@
 
 ### 2.8 Bulk-Disable Pane
 - **Overview:** A button in each pane header (Positive / Negative) lets you disable every currently-enabled prompt in that pane at once.
+- **Confirmation Dialog:** To prevent accidental clicks, a confirmation dialog is shown before the action runs (Enter to execute, Esc / Cancel to abort).
 - **Locking:** Locked groups and items (including those locked via an ancestor group) are excluded and remain enabled.
 
 ## 3. File, Settings & Profiles Management

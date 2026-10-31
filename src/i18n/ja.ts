@@ -87,6 +87,8 @@ export const ja = {
   hideGroupAction: "非表示にする",
   showGroupAction: "再表示する",
   disableAllInPane: "このペインの有効なプロンプトを一括で無効化",
+  disableAllConfirmTitle: "一括無効化の確認",
+  disableAllConfirmMessage: "「{name}」ペインのすべてのプロンプトを無効化します。ロック中の項目は対象外です。よろしいですか？",
 
   enableAll: "グループ内すべて有効化",
   disableAll: "グループ内すべて無効化",
