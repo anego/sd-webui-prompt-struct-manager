@@ -6,9 +6,17 @@
  */
 import { computed, ref } from "vue";
 import { state } from "../store";
-import { buildGroupMap } from "../groupMapUtils";
+import { buildGroupMap, GroupMapItem } from "../groupMapUtils";
+import { useI18n } from "../composables/useI18n";
 
+const { t } = useI18n();
 const isHovered = ref(false);
+
+/** 自身は有効だが、祖先グループが無効なためプロンプトに反映されない状態か */
+const isBlockedByParent = (item: GroupMapItem): boolean => item.enabled && !item.effectiveEnabled;
+
+const itemTitle = (item: GroupMapItem): string =>
+  isBlockedByParent(item) ? `${item.name} (${t("blockedByParentHint")})` : item.name;
 
 // Positive / Negative 両方のツリーを結合して表示
 // ただし表示中のステート(isOpen)などを考慮する？
@@ -56,8 +64,11 @@ const scrollToNode = (id: number) => {
             v-else
             class="py-1 psm-group-map__item cursor-pointer d-flex align-center"
             @click="scrollToNode(item.id)"
-            :title="item.name"
-            :class="!item.enabled ? 'text-grey text-decoration-line-through' : ''"
+            :title="itemTitle(item)"
+            :class="{
+              'text-grey': !item.effectiveEnabled,
+              'text-decoration-line-through': !item.enabled
+            }"
             style="padding-left: 8px;"
           >
             <!-- Indent Guides -->
@@ -71,15 +82,24 @@ const scrollToNode = (id: number) => {
             </div>
 
             <!-- Icon -->
-            <v-icon size="x-small" class="mr-1 ml-1" :color="item.enabled ? 'amber' : 'grey'">
+            <v-icon size="x-small" class="mr-1 ml-1" :color="item.effectiveEnabled ? 'amber' : 'grey'">
               {{ item.depth > 0 ? 'mdi-subdirectory-arrow-right' : 'mdi-folder' }}
             </v-icon>
-            
+
             <!-- Text -->
             <span class="text-caption text-truncate flex-grow-1">{{ item.name }}</span>
-            
-            <!-- Count -->
-            <span v-if="item.enabled && item.activeCount > 0" class="text-caption text-grey ml-1 mr-2">
+
+            <!-- 自身は有効だが親グループが無効で反映されない目印 (ツリー側と同じアイコン) -->
+            <v-icon
+              v-if="isBlockedByParent(item)"
+              size="x-small"
+              class="ml-1 mr-2 flex-shrink-0"
+              color="orange-lighten-2"
+              data-testid="group-map-blocked-icon"
+            >mdi-link-variant-off</v-icon>
+
+            <!-- Count (祖先が無効で反映されない場合は、実際の反映数と誤解されないよう表示しない) -->
+            <span v-else-if="item.effectiveEnabled && item.activeCount > 0" class="text-caption text-grey ml-1 mr-2">
               ({{ item.activeCount }})
             </span>
           </div>

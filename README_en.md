@@ -10,7 +10,7 @@ This project has been tested with "Stable Diffusion WebUI reForge".
 *   **Structured Management**: Manage prompts in a hierarchical structure of groups (folders) and items (tags).
 *   **Intuitive Operation**: Reorder and move items via drag-and-drop. Clone-based dragging keeps the source layout stable while dragging, and drop areas expand so even empty groups are easy to target.
 *   **Quick Move-To**: "Move to..." in the context menu opens a searchable dialog — type a few characters to pick a destination (recent 5 destinations pinned, parent paths shown, full keyboard support).
-*   **Toggle Enable/Disable**: Switch items or groups ON/OFF with a single click (or Spacebar).
+*   **Toggle Enable/Disable**: Switch items or groups ON/OFF with a single click (or Spacebar). When the item is inside a disabled group, you can choose in the settings whether to do nothing, ask, or enable the parent groups automatically (with undo).
 *   **Bulk Toggle**: Easily enable or disable all items within a group at once using icons on the group header.
 *   **Weight Adjustment (Compact Slider)**: Features a compact slider UI (`0.1` to `2.0`) next to each prompt chip. Reset instantly to `1.0` with the "↺" button. You can toggle the slider visibility in settings, and it remembers your choice (LocalStorage).
 *   **Exclusive Group Selection (Single-Choice Mode)**: Toggleable via the switch on the group header (teal blue). When active, enabling one item automatically disables all other sibling items in that group.

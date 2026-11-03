@@ -8,7 +8,11 @@ export type GroupMapItem = {
   id: number;
   name: string;
   depth: number;
+  /** グループ自身の有効状態 */
   enabled: boolean;
+  /** 自身と祖先がすべて有効で、実際にプロンプトへ反映されるかどうか */
+  effectiveEnabled: boolean;
+  /** グループ自身の状態のみで数えた有効プロンプト数 (祖先の有効状態は考慮しない) */
   activeCount: number;
 };
 
@@ -27,13 +31,13 @@ interface WalkResult {
  *  全プロンプトの有効/無効トグルのたびにこのマップは再計算されるため、
  *  択一選択で多数の兄弟が同時に切り替わると体感できるラグの原因になっていた)
  */
-const walkGroupTree = (nodes: PsmItem[], depth = 0): WalkResult => {
+const walkGroupTree = (nodes: PsmItem[], depth = 0, ancestorDisabled = false): WalkResult => {
   let groups: GroupMapItem[] = [];
   let activeCount = 0;
   for (const node of nodes) {
     if (!node) continue;
     if (node.is_group) {
-      const childResult = walkGroupTree(node.children || [], depth + 1);
+      const childResult = walkGroupTree(node.children || [], depth + 1, ancestorDisabled || !node.enabled);
       // 親(このグループ)が無効なら、子孫の有効数に関わらずこのグループの集計は0とみなす
       const groupActiveCount = node.enabled ? childResult.activeCount : 0;
       groups.push({
@@ -41,6 +45,7 @@ const walkGroupTree = (nodes: PsmItem[], depth = 0): WalkResult => {
         name: node.name || "(No Name)",
         depth,
         enabled: node.enabled,
+        effectiveEnabled: node.enabled && !ancestorDisabled,
         activeCount: groupActiveCount,
       });
       groups = groups.concat(childResult.groups);

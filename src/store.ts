@@ -1,5 +1,5 @@
 import { reactive, toRaw, watch } from "vue";
-import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange } from "./types";
 import { Logger, setDebugMode } from "./log";
 import { GENERATION_FIELDS, getActiveTabPrefix, captureGenerationSettings } from "./generationFields";
 
@@ -66,6 +66,10 @@ export const state = reactive({
   duplicateTexts: new Set<string>(),
   /** 現在のハイライトレベル（色分け用） */
   duplicateHighlightLevel: null as "warn" | "error" | null,
+  /** 親グループが無効な項目を有効にしようとしたときの挙動 */
+  parentActivationMode: "confirm" as ParentActivationMode,
+  /** 親グループが無効な項目の有効化に関する通知 (null の間は通知を表示しない) */
+  parentActivationNotice: null as ParentActivationNotice | null,
   /** 最後に選択されていたファイル名 */
   lastFile: "",
   /** 重みスライダーを表示するかどうか */
@@ -461,6 +465,226 @@ export const toggleGroupExclusive = async (group: PsmItem, forceVal?: boolean) =
   await savePrompts();
 };
 
+// -------------------------------------------------------------------------
+// 親グループが無効な項目の有効化 (祖先グループの自動有効化)
+// -------------------------------------------------------------------------
+// 祖先グループが1つでも無効だと、配下の項目は有効にしてもプロンプトに反映されない。
+// 有効にしようとしたときの挙動を設定 (parentActivationMode) で選べるようにし、
+// 祖先も有効にした場合は通知から元に戻せるようにする。
+
+/** ツリー内のノードと、そのノードを含むリスト (兄弟リスト) の組 */
+interface NodePathEntry {
+  node: PsmItem;
+  siblings: PsmItem[];
+}
+
+const PARENT_ACTIVATION_MODES: readonly ParentActivationMode[] = ["none", "confirm", "auto"];
+
+/** 値が ParentActivationMode として有効かを判定する (ローカル設定の読み込みやUIからの入力用) */
+export const isParentActivationMode = (value: unknown): value is ParentActivationMode =>
+  typeof value === "string" && PARENT_ACTIVATION_MODES.some((mode) => mode === value);
+
+/**
+ * 指定IDのアイテムまでの経路を、ルート直下のノードから対象自身まで順に返す。
+ * 祖先グループの有効状態や、択一グループの兄弟をたどるために使う。
+ * @returns 見つからない場合は null
+ */
+export const findNodePath = (targetId: number): NodePathEntry[] | null => {
+  const trail: NodePathEntry[] = [];
+  const search = (nodes: PsmItem[]): boolean => {
+    for (const node of nodes) {
+      if (!node) continue;
+      trail.push({ node, siblings: nodes });
+      if (node.id === targetId) return true;
+      if (node.is_group && node.children && search(node.children)) return true;
+      trail.pop();
+    }
+    return false;
+  };
+  if (search(state.positive) || search(state.negative)) return trail;
+  return null;
+};
+
+/** 指定アイテムの祖先のうち、無効になっているグループを外側から順に返す */
+export const getDisabledAncestors = (targetId: number): PsmItem[] => {
+  const path = findNodePath(targetId);
+  if (!path) return [];
+  return path.slice(0, -1).map((entry) => entry.node).filter((node) => !node.enabled);
+};
+
+const groupNameOf = (group: PsmItem): string => group.name || "(No Name)";
+
+/** 実際にプロンプトへ反映される (自身と祖先がすべて有効な) プロンプトのIDを集める */
+const collectEffectiveLeafIds = (nodes: PsmItem[], out: Set<number> = new Set()): Set<number> => {
+  for (const node of nodes) {
+    if (!node || !node.enabled) continue;
+    if (!node.is_group) {
+      out.add(node.id);
+    } else if (node.children) {
+      collectEffectiveLeafIds(node.children, out);
+    }
+  }
+  return out;
+};
+
+/** 指定ノード自身と子孫に含まれるプロンプトのIDを、有効状態に関係なく集める */
+const collectLeafIds = (nodes: PsmItem[], out: Set<number> = new Set()): Set<number> => {
+  for (const node of nodes) {
+    if (!node) continue;
+    if (!node.is_group) {
+      out.add(node.id);
+    } else if (node.children) {
+      collectLeafIds(node.children, out);
+    }
+  }
+  return out;
+};
+
+/** 有効状態を変更し、変更した場合は元に戻せるよう変更前の値を記録する */
+const setEnabledRecorded = (node: PsmItem, enabled: boolean, changes: EnabledChange[]): void => {
+  if (node.enabled === enabled) return;
+  changes.push({ id: node.id, previous: node.enabled });
+  node.enabled = enabled;
+};
+
+/**
+ * 経路上の無効なノード (祖先グループと対象自身) をすべて有効にする。
+ * 有効にしたノードの親が択一グループの場合は、通常の切り替えと同じく兄弟を無効にする。
+ * @returns 元に戻すための変更記録と、有効にした祖先グループ名、対象以外に新たに反映されるプロンプト数
+ */
+const enablePathRecorded = (path: NodePathEntry[]): { changes: EnabledChange[]; groupNames: string[]; extraCount: number } => {
+  const roots = [...state.positive, ...state.negative];
+  const before = collectEffectiveLeafIds(roots);
+  const changes: EnabledChange[] = [];
+  const groupNames: string[] = [];
+
+  path.forEach((entry, index) => {
+    if (entry.node.enabled) return;
+    setEnabledRecorded(entry.node, true, changes);
+    if (index < path.length - 1) groupNames.push(groupNameOf(entry.node));
+
+    const parentGroup = index > 0 ? path[index - 1].node : undefined;
+    if (!parentGroup?.isExclusive) return;
+    for (const sibling of entry.siblings) {
+      if (sibling && sibling.id !== entry.node.id) setEnabledRecorded(sibling, false, changes);
+    }
+  });
+
+  // 祖先を有効にしたことで、以前から有効だった兄弟なども一緒に反映されるようになるため、その件数を数える
+  const after = collectEffectiveLeafIds(roots);
+  const targetLeafIds = collectLeafIds([path[path.length - 1].node]);
+  const extraCount = [...after].filter((id) => !before.has(id) && !targetLeafIds.has(id)).length;
+  return { changes, groupNames, extraCount };
+};
+
+/**
+ * 有効/無効の切り替え要求を処理する (マウス・キーボード共通の入口)。
+ * 無効な祖先グループがある状態で有効にしようとした場合は、parentActivationMode に従って
+ * 何もしない (理由を通知) / 確認する / 祖先グループも有効にする のいずれかを行う。
+ */
+export const requestToggleEnabled = async (item: PsmItem): Promise<void> => {
+  if (isItemLocked(item.id)) return;
+  const path = findNodePath(item.id);
+  if (!path) {
+    Logger.warn(`[Store/Toggle] ツリー内にID ${item.id} のアイテムが見つからないため、有効/無効を切り替えませんでした。`);
+    return;
+  }
+  const entry = path[path.length - 1];
+  const parentGroup = path.length > 1 ? path[path.length - 2].node : undefined;
+  const disabledAncestors = path.slice(0, -1).map((e) => e.node).filter((node) => !node.enabled);
+
+  // 無効化する場合と、祖先がすべて有効な場合は従来どおりに切り替える
+  if (item.enabled || disabledAncestors.length === 0) {
+    if (item.is_group) {
+      await toggleGroupEnabled(item);
+    } else {
+      await toggleItemEnabled(item, entry.siblings, parentGroup);
+    }
+    return;
+  }
+
+  const groupNames = disabledAncestors.map(groupNameOf);
+  if (state.parentActivationMode === "none") {
+    state.parentActivationNotice = { kind: "blocked", itemId: item.id, groupNames };
+    Logger.debug(`[Store/Toggle] 親グループ「${groupNames.join(" > ")}」が無効で、設定が「何もしない」のため、「${item.name || item.content}」を有効にしませんでした。`);
+    return;
+  }
+  if (state.parentActivationMode === "confirm") {
+    state.parentActivationNotice = { kind: "confirm", itemId: item.id, groupNames };
+    Logger.debug(`[Store/Toggle] 親グループ「${groupNames.join(" > ")}」が無効のため、祖先グループも有効にするかの確認を表示します。`);
+    return;
+  }
+  await activateWithAncestors(item.id);
+};
+
+/**
+ * 対象アイテムと、無効になっている祖先グループをまとめて有効にして保存し、元に戻せる通知を出す
+ */
+export const activateWithAncestors = async (itemId: number): Promise<void> => {
+  if (isItemLocked(itemId)) return;
+  const path = findNodePath(itemId);
+  if (!path) {
+    Logger.warn(`[Store/Toggle] ツリー内にID ${itemId} のアイテムが見つからないため、祖先グループの有効化を中止しました。`);
+    state.parentActivationNotice = null;
+    return;
+  }
+
+  const { changes, groupNames, extraCount } = enablePathRecorded(path);
+  if (changes.length === 0) {
+    state.parentActivationNotice = null;
+    return;
+  }
+  state.selectedProfileName = "";
+  await savePrompts();
+  state.parentActivationNotice = { kind: "activated", itemId, groupNames, extraCount, changes };
+  Logger.info(`[Store/Toggle] 親グループ「${groupNames.join(" > ")}」も有効にし、対象のアイテムをプロンプトへ反映するようにしました。`, {
+    itemId,
+    extraCount,
+    changedCount: changes.length,
+  });
+};
+
+/** 確認の通知で「親も有効にする」が押されたときに、確認待ちのアイテムを祖先ごと有効にする */
+export const confirmParentActivation = async (): Promise<void> => {
+  const notice = state.parentActivationNotice;
+  if (!notice || notice.kind !== "confirm") return;
+  await activateWithAncestors(notice.itemId);
+};
+
+/** 確認の通知で「今後は自動で有効にする」が押されたときに、設定を自動へ切り替えてから有効にする */
+export const confirmParentActivationAlways = async (): Promise<void> => {
+  const notice = state.parentActivationNotice;
+  if (!notice || notice.kind !== "confirm") return;
+  setParentActivationMode("auto");
+  await activateWithAncestors(notice.itemId);
+};
+
+/** 直前に行った祖先グループの有効化を元に戻す */
+export const undoParentActivation = async (): Promise<void> => {
+  const notice = state.parentActivationNotice;
+  if (!notice || notice.kind !== "activated") return;
+  state.parentActivationNotice = null;
+  // 記録と逆順に戻すことで、同じノードを複数回変更していても最初の状態へ戻る
+  for (const change of [...notice.changes].reverse()) {
+    const path = findNodePath(change.id);
+    if (path) path[path.length - 1].node.enabled = change.previous;
+  }
+  state.selectedProfileName = "";
+  await savePrompts();
+  Logger.info(`[Store/Toggle] 親グループ「${notice.groupNames.join(" > ")}」の自動有効化を元に戻しました。`);
+};
+
+/** 親グループの有効化に関する通知を閉じる */
+export const dismissParentActivationNotice = (): void => {
+  state.parentActivationNotice = null;
+};
+
+/** 親グループが無効な項目を有効にしようとしたときの挙動を設定し、ローカル設定へ保存する */
+export const setParentActivationMode = (mode: ParentActivationMode): void => {
+  state.parentActivationMode = mode;
+  saveSettingsLocal();
+};
+
 /**
  * プロンプトアイテムの重み（weight）を 1.0 にリセットする
  */
@@ -812,6 +1036,8 @@ export const loadPrompts = async () => {
     state.profiles = data.profiles || [];
     state.modelMode = data.model_mode === "anima" ? "anima" : "sd"; // 未定義は "sd" (後方互換)
     state.selectedProfileName = "";
+    // 通知が指すアイテムは読み込み前のツリーのものなので、元に戻す等の操作ができないよう閉じる
+    state.parentActivationNotice = null;
     
     // 読み込まれたプロンプトデータの要約をテーブルとグループで可視化
     console.groupCollapsed(`[PSM][Store/Data] ファイル「${state.selectedFile}」から読み込まれたプロンプトツリー構造の要約を展開します。`);
@@ -1069,6 +1295,13 @@ export const loadSettingsLocal = () => {
       if (data.sidebar_open !== undefined) state.isSidebarOpen = data.sidebar_open;
       if (data.toggle_shortcut) state.toggleShortcut = data.toggle_shortcut;
       if (data.duplicate_check_mode) state.duplicateCheckMode = data.duplicate_check_mode;
+      if (data.parent_activation_mode !== undefined) {
+        if (isParentActivationMode(data.parent_activation_mode)) {
+          state.parentActivationMode = data.parent_activation_mode;
+        } else {
+          Logger.warn(`[Store/Settings] ローカル設定の parent_activation_mode「${String(data.parent_activation_mode)}」は不明な値のため、既定値「${state.parentActivationMode}」で動作します。`);
+        }
+      }
       if (data.show_weight_slider !== undefined) state.showWeightSlider = data.show_weight_slider;
       if (data.show_hidden_groups !== undefined) state.showHiddenGroups = data.show_hidden_groups;
       if (Array.isArray(data.recent_move_targets)) {
@@ -1088,6 +1321,7 @@ export const saveSettingsLocal = () => {
     sidebar_open: state.isSidebarOpen,
     toggle_shortcut: state.toggleShortcut,
     duplicate_check_mode: state.duplicateCheckMode,
+    parent_activation_mode: state.parentActivationMode,
     show_weight_slider: state.showWeightSlider,
     show_hidden_groups: state.showHiddenGroups,
     recent_move_targets: state.recentMoveTargets,
@@ -2656,8 +2890,18 @@ export const setToggleShortcut = async (shortcut: string) => {
 };
 
 /**
+ * 重複チェック用にプロンプトの内容を正規化する
+ * 末尾のカンマは出力時に除去されるため、"on stomach," と "on stomach" は同じプロンプトとして扱う。
+ * (BREAK区切り線の表示判定と同じく、"BREAK," も制御キーワードの BREAK として扱われる)
+ */
+const normalizeForDuplicateCheck = (content: string): string => {
+  return (content || "").trim().replace(/\s*,$/, "");
+};
+
+/**
  * 有効なプロンプトの中で重複しているテキストを抽出する
- * ポジティブ・ネガティブ全体を走査して判定。
+ * ポジティブ・ネガティブ全体を走査して判定。非表示グループ (配下を含む) は対象外。
+ * 戻り値のテキストは正規化 (normalizeForDuplicateCheck) 済み。
  */
 export const detectDuplicates = (): Set<string> => {
   const seen = new Set<string>();
@@ -2670,11 +2914,13 @@ export const detectDuplicates = (): Set<string> => {
     for (const node of nodes) {
       if (!node) continue;
       const effectiveEnabled = node.enabled && !parentDisabled;
-      
+
       if (node.is_group && node.children) {
+        // 非表示グループは重複チェックの対象外とする (表示されないチップを重複として扱わないため)
+        if (node.isHidden) continue;
         walk(node.children, !effectiveEnabled);
       } else if (!node.is_group && effectiveEnabled) {
-        const text = (node.content || "").trim();
+        const text = normalizeForDuplicateCheck(node.content);
         // 制御キーワードは重複チェックの対象外とする
         if (text && !IGNORED_TOKENS.has(text.toUpperCase())) {
           if (seen.has(text)) {
@@ -2699,6 +2945,28 @@ export const clearDuplicateHighlight = () => {
   state.duplicateTexts.clear();
   state.duplicateHighlightLevel = null;
 };
+
+/**
+ * プロンプトの内容が、重複として強調中のテキストか判定する
+ * プロンプトの枠とグループ枠の強調表示で同じ判定を使う。detectDuplicates と同じく、前後の空白と末尾のカンマは除いて照合する。
+ * (プロンプト自身とその祖先が有効かどうかは、呼び出し側で判定する)
+ */
+export const isDuplicateHighlighted = (content: string): boolean => {
+  const text = normalizeForDuplicateCheck(content);
+  return !!text && state.duplicateTexts.has(text);
+};
+
+/**
+ * 重複として強調中のテキストを持つ有効なプロンプトが、配下 (入れ子を含む) にあるか判定する
+ * グループ枠の強調表示に使う。無効な項目と、無効なグループ・非表示グループの配下は対象外。
+ * (呼び出し元のグループ自身とその祖先が有効・表示中かどうかは、呼び出し側で判定する)
+ */
+export const containsDuplicatePrompt = (nodes: PsmItem[]): boolean =>
+  nodes.some((node) => {
+    if (!node || !node.enabled) return false;
+    if (node.is_group) return !node.isHidden && containsDuplicatePrompt(node.children ?? []);
+    return isDuplicateHighlighted(node.content);
+  });
 
 /**
  * 重複プロンプトチェックモードを設定し、保存する

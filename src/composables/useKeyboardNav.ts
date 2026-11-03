@@ -5,7 +5,7 @@
  * @param callbacks 各種イベントコールバック (context menuなど)
  */
 import { PsmItem } from "../types";
-import { state, startEdit, startDeleteConfirm, toggleGroupEnabled, addItem, findParentAndItem } from "../store";
+import { state, startEdit, startDeleteConfirm, requestToggleEnabled, addItem, findParentAndItem } from "../store";
 
 // 表示中のアイテムを再帰的にフラット化するヘルパー
 const getVisibleFlatList = (nodes: PsmItem[]): PsmItem[] => {
@@ -115,7 +115,8 @@ export const useKeyboardNav = (callbacks?: { onContextMenu?: () => void }) => {
         e.preventDefault();
         const item = findItem(state.focusedItemId);
         if (item) {
-           toggleGroupEnabled(item);
+          // マウス操作と同じ入口を使い、択一グループの兄弟の無効化や、親グループが無効な場合の扱いを揃える
+          requestToggleEnabled(item);
         }
         break;
       }

@@ -24,17 +24,19 @@ Quality assurance in PSM covers logic with automated tests, and screen rendering
 - **Save Speed (write cache):** Verifies `save-prompts` updates only the in-memory cache without disk I/O, explicit flushing via `flush-prompts`, read-your-own-writes consistency for `get-prompts`, that duplicate/rename/delete correctly handle pending unflushed cache changes (preventing stale copies and deleted-file resurrection), and that the shutdown event flushes everything (see `test_psm_cache.py` for cache-level debounce unit tests).
 - **YAML→JSON Migration:** Verifies reading/writing `.json` files, that `list-files` includes both `.yaml` and `.json` while excluding `generation_profiles.json`, `convert-to-json` behavior (reflecting unflushed pending changes, leaving the source untouched, refusing to overwrite an existing destination), and that duplicate/rename inherit the source file's format when no extension is given.
 
-### 2.2 Frontend Store Logic Tests (`bun test` - 203 Cases)
+### 2.2 Frontend Store Logic Tests (`bun test` - 238 Cases)
 - **Core Operations:** Tests node addition, editing, removal, and drag placement on store states.
 - **Exclusive Selection (Single-Choice):**
   - Confirms checking one item turns off all sibling elements within an exclusive group.
   - Confirms turning ON single-choice mode automatically cleans up multiple enabled items to leave only the first one enabled.
 - **Profiles Snapshot:**
   - Tests snapshot capture (`saveProfile`), batch restoring of properties, and removing profiles.
-- **Duplicate Checking:** Tests mode transitions between `none`, `warn`, and `error` modes.
+- **Duplicate Checking:** Tests mode transitions between `none`, `warn`, and `error` modes. Verifies that `detectDuplicates` detects prompts that differ only by a trailing comma (`on stomach` and `on stomach,`) as duplicates, also excludes `BREAK,` and `AND,` with a trailing comma as control tokens, and does not count prompts in hidden groups (including nested groups inside them) (3 cases added).
+- **Detecting Groups That Contain Duplicates:** Verifies that `containsDuplicatePrompt` (used to highlight group borders) detects a duplicate deep in nested groups from both the outer and inner groups, does not detect anything for groups without duplicates, disabled prompts, or prompts under a disabled or hidden group, matches text after trimming surrounding whitespace, and detects nothing after the highlight is cleared (6 cases added).
+- **Detecting Highlighted Duplicate Prompts:** Verifies that `isDuplicateHighlighted`, shared by the prompt border and group border highlights, detects only content that matches a highlighted text after trimming surrounding whitespace and a trailing comma, and detects nothing for empty or whitespace-only content or after the highlight is cleared (4 cases added).
 - **Loading Control:** Verifies the reactive coordination of `isLoading` and `loadingText` state counters during initial file load operations, ensuring that the spinner does not lock user interactions during daily auto-saving (`savePrompts`) (2 cases).
 - **Compile Formatting (Underscore Replacement):** Assures auto-replacement of underscores with spaces for prompt content, and underscore preservation for Dynamic Prompts wildcards (`__wildcard__`) (1 case added).
-- **Group Map Aggregation (`groupMapUtils.ts`):** Verifies the single-pass active-prompt-count walk (reusing child results) matches the old implementation's behavior for nested groups, including that a disabled ancestor doesn't affect a descendant group's own count (`groupMapUtils.spec.ts`, 10 cases added).
+- **Group Map Aggregation (`groupMapUtils.ts`):** Verifies the single-pass active-prompt-count walk (reusing child results) matches the old implementation's behavior for nested groups, including that a disabled ancestor doesn't affect a descendant group's own count, and that only groups whose ancestors and self are all enabled are marked as actually reflected (`effectiveEnabled`) (`groupMapUtils.spec.ts`, 13 cases).
 - **Bulk-Disable Confirmation Flow:** Verifies `requestDisableAll` changes and saves nothing by itself, `confirmDisableAll` disables and saves the target pane and clears the pending state, `cancelDisableAll` changes nothing, and that confirming with nothing pending (or a second time) does nothing (5 cases added).
 - **Startup Initialization (`initializePsm`):** Verifies `get-prompts` runs exactly once at startup even when a previously selected file exists, generation profiles are loaded, and nothing is loaded when setup is incomplete or the last file no longer exists (4 cases added).
 - **Save Speed (Phase C):** Verifies `createPromptFile` defaults to `.json` when no extension is given, that `duplicateCurrentFile`/`renameCurrentFile` inherit the source file's extension instead of forcing `.yaml`, and the success/error paths of `convertCurrentFileToJson`.
@@ -42,6 +44,7 @@ Quality assurance in PSM covers logic with automated tests, and screen rendering
 - **Reactive Proxy vs. Raw Array Identity:** Verifies that lock checks (`isListLocked`), descendant checks for move targets, and drag-and-drop move finalization treat a Vue reactive Proxy and its raw array as the same list.
 - **Adding, Editing, Duplicating, and Deleting Items (migrated from E2E):** Verifies `addItem` appending/inserting at a given index and creating prompts vs. groups, confirming/cancelling via `startEdit`/`finishEdit`/`cancelEdit` (cancelling a new item removes the empty item; content with brackets is not escaped when saved), `duplicateItem` placing the copy right after the original with new IDs (groups are deep-cloned independently with their descendants), delete confirm → execute/cancel, and promoting children when only the group frame is deleted (14 cases added).
 - **Group-Wide Enable/Disable and Duplicate Check Mode Switching (migrated from E2E):** Verifies `setGroupChildrenEnabled` toggles all descendants (including nested ones) and saves, leaves locked groups untouched, and that `setDuplicateCheckMode` switches the mode, saves it to local settings, and clears existing duplicate highlights (3 cases added).
+- **Enabling Items Inside a Disabled Group:** Verifies that the shared mouse/keyboard entry point `requestToggleEnabled` toggles as before when all ancestors are enabled (also disabling siblings in an exclusive group), and that when an ancestor is disabled it follows the setting (`parentActivationMode`): "do nothing (show the reason)", "ask", or "enable automatically". Also covers enabling multiple ancestor levels from the outside in, disabling an ancestor's siblings when its parent is exclusive, counting the other prompts that become reflected, undo, doing nothing while locked, saving/restoring the setting, closing the notice when a file is loaded, and the same behavior for the `Space` key (19 cases added).
 
 ### 2.3 Manual Verification Checklist
 Before each release (and after any UI-related change), reload the WebUI and check the following. Preparing a file that contains groups, nested groups, and a prompt with `__wildcard__` makes this faster. For items with a "Related unit tests" entry, the logic is already covered by automated tests, so only check that it is reflected on screen and the interaction works.
@@ -76,7 +79,7 @@ Check with an item focused by clicking it.
 |---|---|---|---|
 | C-1 | Press the up/down arrow keys | Focus moves to the previous/next item and a 2px solid orange (`#FF9800`) outline is shown | — |
 | C-2 | Focus a group and press the left/right arrow keys | Right opens the group, left closes it | — |
-| C-3 | Press `Space` | The focused item's enabled state toggles | — |
+| C-3 | Press `Space` | The focused item's enabled state toggles (in an exclusive group the others are disabled, same as with the mouse; inside a disabled group it behaves as in I-2 to I-4) | 2.2 Enabling Items Inside a Disabled Group |
 | C-4 | Press `Enter` | Nothing happens (the edit modal does not open) | — |
 | C-5 | Press `F2` | The edit modal for the focused item opens | — |
 | C-6 | Press `Insert` / `Shift+Insert` | The new prompt / group modal opens (added as the first child of an open group, otherwise right after the item) | 2.2 Adding, Editing... (`addItem` index) |
@@ -105,10 +108,14 @@ Check with an item focused by clicking it.
 | No | Steps | Expected Result | Related unit tests |
 |---|---|---|---|
 | F-1 | Set duplicate check to "No Check" and apply with duplicate prompts present | They are applied to the WebUI prompt fields as is | 2.2 Duplicate Checking |
-| F-2 | Set duplicate check to "Show Warning" and apply | Duplicates are highlighted in the warning color; choosing apply in the warning dialog applies them | 2.2 Duplicate Checking |
-| F-3 | Set duplicate check to "Stop with Error" and apply | Duplicates are highlighted in the error color, an error dialog appears, nothing is applied, and the panel stays open | 2.2 Duplicate Checking |
+| F-2 | Set duplicate check to "Show Warning" and apply | Duplicate prompts (the chip fill plus an outer border with a small gap and a glow) and the borders of the groups containing them are highlighted in the warning color; choosing apply in the warning dialog applies them | 2.2 Duplicate Checking, Detecting Groups That Contain Duplicates, Detecting Highlighted Duplicate Prompts |
+| F-3 | Set duplicate check to "Stop with Error" and apply | Duplicate prompts (the chip fill plus an outer border with a small gap and a glow) and the borders of the groups containing them are highlighted in the error color, an error dialog appears, nothing is applied, and the panel stays open | 2.2 Duplicate Checking, Detecting Groups That Contain Duplicates, Detecting Highlighted Duplicate Prompts |
 | F-4 | Apply a prompt with a changed weight | It is applied to the WebUI prompt field in `(word:weight)` format | 2.2 Compile Formatting |
 | F-5 | Press the pane's bulk-disable button, cancel in the confirm dialog → press it again and confirm | Cancel changes nothing; confirm disables all prompts except locked ones | 2.2 Bulk-Disable Confirmation Flow |
+| F-6 | Put a duplicate prompt deep inside nested groups, collapse the outer group, and do F-2 or F-3 | Every group containing the duplicate, up to the outermost ancestor and including collapsed groups, gets a thick border in the highlight color (taking priority over the random, lock, and hidden borders). Groups without duplicates keep their normal border. Disabling one of the duplicate prompts removes the highlight from that prompt's border and from groups that contained only that prompt. Focusing a duplicate prompt shows both the inner focus outline and the outer duplicate border | 2.2 Detecting Groups That Contain Duplicates |
+| F-7 | Put the same prompt in two hidden groups (with no other duplicates) and do F-2 | It is not detected as a duplicate and is applied without the warning dialog. Even with "Show Hidden Groups" ON, chips and borders inside the hidden groups are not highlighted | 2.2 Duplicate Checking, Detecting Groups That Contain Duplicates |
+| F-8 | Put `BREAK,` (with a trailing comma) in two groups (with no other duplicates) and do F-2 | It is not detected as a duplicate and is applied without the warning dialog | 2.2 Duplicate Checking |
+| F-9 | Put `on stomach` and `on stomach,` (with a trailing comma) in separate groups and do F-2 | They are detected as duplicates; both chips and the borders of the groups containing them are highlighted in the warning color | 2.2 Duplicate Checking, Detecting Highlighted Duplicate Prompts |
 
 #### G. Search Filters & Profiles
 | No | Steps | Expected Result | Related unit tests |
@@ -126,6 +133,19 @@ Check with an item focused by clicking it.
 | H-2 | Press "Insert" in the dictionary | Tags are inserted into the content field, comma-separated | — |
 | H-3 | With the name field empty, enter a keyword in the dictionary's search field and press "Insert" | The search keyword is copied to the name field (an existing name is not overwritten) | — |
 | H-4 | Close the edit modal | The dictionary panel returns to its original place (`txt2img_actions_column`, etc.) and collapses | — |
+
+#### I. Enabling Items Inside a Disabled Group
+Check with a disabled group that contains enabled and disabled prompts and child groups. Switch the setting under "Display & Check" → "When enabling an item in a disabled group" in the sidebar.
+| No | Steps | Expected Result | Related unit tests |
+|---|---|---|---|
+| I-1 | Look at enabled prompts and child groups inside a disabled group | Both are shown in grey with an orange icon (`mdi-link-variant-off`). Prompts have no strikethrough (disabled prompts keep the strikethrough as before), and their tooltip says "Not added to the prompt because a parent group is disabled" | — |
+| I-2 | With "Do nothing (show the reason)", click a disabled prompt inside a disabled group | Nothing changes, and a notice says it is not added to the prompt because the parent group "…" is disabled | 2.2 Enabling Items Inside a Disabled Group |
+| I-3 | With "Ask whether to enable parent groups" (default), do the same and press "Enable parents" in the notice | Nothing changes before pressing it. After pressing, the ancestor groups and the item are enabled, and a notice says the parent group "…" was also enabled, with the count of other prompts that are now added, if any | 2.2 Enabling Items Inside a Disabled Group |
+| I-4 | With "Enable parent groups automatically", do the same and press "Undo" in the notice | A single click enables the ancestor groups and the item, and "Undo" restores the previous state | 2.2 Enabling Items Inside a Disabled Group |
+| I-5 | Press "Always do this" in the confirmation notice | The item is enabled along with its ancestors, and the sidebar setting switches to "Enable parent groups automatically" (kept after reload) | 2.2 Enabling Items Inside a Disabled Group |
+| I-6 | Filter with the search field and enable a prompt inside a disabled group | As in I-2 to I-4, the ancestor groups can be enabled according to the setting and the prompt is added to the prompt field | 2.2 Enabling Items Inside a Disabled Group |
+| I-7 | With the automatic setting, in an exclusive ancestor group where another child group is enabled, enable a prompt under a disabled child group | That child group is enabled and the other child group is disabled by the exclusive rule | 2.2 Enabling Items Inside a Disabled Group |
+| I-8 | With an enabled child group inside a disabled group, open the group map on the right edge | The child group is shown in grey with the orange icon, and its active count is not shown | 2.2 Group Map Aggregation |
 
 ---
 

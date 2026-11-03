@@ -17,6 +17,8 @@
 
 ### 1.2 Prompt Editing & Adjustment
 - **Enable/Disable:** Temporarily disable prompts via checkboxes without deleting them. Disabling a parent group excludes all child elements from output.
+  - **Enabling an item inside a disabled group:** Under "Display & Check" in the settings, choose "Do nothing (show the reason)", "Ask whether to enable parent groups" (default), or "Enable parent groups automatically". When ancestor groups are enabled, other prompts that were already enabled inside them are added as well, so the notice shows their count, and "Undo" in the notice restores the previous state. If an ancestor group's parent is exclusive, its sibling groups are disabled by the exclusive rule. The setting is saved in LocalStorage.
+  - **Marker for items that are not added:** Prompts and child groups that are enabled themselves but not added because a parent group is disabled show an orange icon (prompts have no strikethrough, so they can be told apart from disabled ones). In the group map, such child groups are shown in grey without an active count.
 - **Weighting:** Features a compact slider UI (`0.1` to `2.0`) next to each prompt chip for intuitive adjustments. Reset instantly to `1.0` with the "↺" button on the right edge of the slider.
 - **Toggle Slider Visibility:** You can turn the weight slider ON/OFF in settings (gear icon). The choice is remembered (LocalStorage) even after reloading the page.
 - **Underscore to Space Auto-Replacement:** If prompt content contains underscores (e.g., `sway_back`), they are automatically replaced with single spaces (e.g., `sway back`) when compiling and reflecting to the WebUI. The following tokens are protected and keep their underscores intact (checked per comma-separated token, so mixed multi-tag items are handled correctly):
@@ -63,8 +65,12 @@
 
 ### 1.7 Duplicate Detection
 - **Auto Detection:** Automatically detects and highlights duplicate prompts that have the exact same text within the tree.
+  - Surrounding whitespace and a trailing comma are ignored when comparing (they are removed on output, so `on stomach` and `on stomach,` are detected as duplicates).
+  - Duplicate prompts get an outer border and glow in the highlight color (warning color / error color) in addition to the chip color.
+  - Every group containing a duplicate prompt (including all ancestor groups) also gets a thick border in the same highlight color as the prompt (warning color / error color). Even if the duplicate is inside a collapsed group or deep in nested groups, you can find it by following the highlighted borders.
 - **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
-- **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks.
+- **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks. This also applies with a trailing comma, such as `BREAK,`.
+- **Hidden Groups Exclusion:** Prompts in hidden groups (including nested groups inside them) are excluded from duplicate checks.
 
 ### 1.8 Prompt Dictionary Dual-way Integration
 - **Portal Teleportation:** Upon opening the prompt editing modal, the DOM element of the "Prompt Dictionary on SDwebUI" extension is immediately detected and teleported (appendChild) into the modal's portal placeholder without any lag.
@@ -86,6 +92,7 @@
 - **Show/hide toggle:** Clicking the eye icon next to the search filter in each pane (Positive / Negative) turns "Show Hidden Groups" ON/OFF, revealing or re-hiding all hidden groups at once. This is a single global setting shared between the Positive and Negative panes, persisted in local storage so it survives a page reload.
 - **Works with search:** When you type into the search filter, hidden groups' contents are still included in the search results even if "Show Hidden Groups" is OFF — so you can still find something you forgot you hid.
 - **Visual indication:** While "Show Hidden Groups" is ON, hidden groups are shown semi-transparent with a dotted border and an eye-slash badge next to the group name.
+- **Excluded from duplicate checks:** Prompts in hidden groups (including nested groups inside them) are excluded from duplicate checks, even while "Show Hidden Groups" is ON.
 - **Interaction with locking:** A locked group's hidden state cannot be toggled either (treated the same as other group setting changes).
 
 ## 2. User Interface (UI/UX)

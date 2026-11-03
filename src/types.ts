@@ -115,6 +115,39 @@ export interface PsmProfile {
 export type DuplicateCheckMode = "none" | "warn" | "error";
 
 /**
+ * 親グループが無効な項目を有効にしようとしたときの挙動 (localStorage "psm_settings" に保存)
+ * - "none": 何もしない (反映されない理由だけを通知する)
+ * - "confirm": 通知で確認し、「親も有効にする」が押された場合のみ祖先グループも有効にする
+ * - "auto": 祖先グループも自動で有効にし、通知から元に戻せるようにする
+ */
+export type ParentActivationMode = "none" | "confirm" | "auto";
+
+/** 有効/無効を変更したアイテムの、変更前の状態 (元に戻す用) */
+export interface EnabledChange {
+  id: number;
+  previous: boolean;
+}
+
+/**
+ * 親グループが無効な項目を有効にしようとしたときの通知内容
+ * groupNames は無効だった祖先グループの名前で、外側から順に並ぶ
+ * - "blocked": 何も変更していない (反映されない理由の通知のみ)
+ * - "confirm": 祖先グループも有効にするかの確認待ち
+ * - "activated": 祖先グループも有効にした (changes を使って元に戻せる)
+ */
+export type ParentActivationNotice =
+  | { kind: "blocked"; itemId: number; groupNames: string[] }
+  | { kind: "confirm"; itemId: number; groupNames: string[] }
+  | {
+      kind: "activated";
+      itemId: number;
+      groupNames: string[];
+      /** 対象以外に、新たにプロンプトへ反映されるようになったプロンプトの件数 */
+      extraCount: number;
+      changes: EnabledChange[];
+    };
+
+/**
  * 生成設定プロファイルが管理できる項目のID (Phase 6)
  * WebUIのCheckpoint/Sampling Steps等のうち、どの項目を保存・適用の対象にするかを表す。
  * VAE / Sampling Method / Schedule Type はWebUI側のドロップダウン実装の都合上、

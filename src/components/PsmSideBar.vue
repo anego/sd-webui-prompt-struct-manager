@@ -17,6 +17,8 @@ import {
   listFiles,
   clearDuplicateHighlight,
   setDuplicateCheckMode,
+  setParentActivationMode,
+  isParentActivationMode,
   saveSettingsLocal,
   setModelMode,
   loadTranslateSettings,
@@ -319,6 +321,21 @@ onUnmounted(() => {
                 <v-radio :label="t('checkNone')" value="none"></v-radio>
                 <v-radio :label="t('checkWarn')" value="warn"></v-radio>
                 <v-radio :label="t('checkError')" value="error"></v-radio>
+              </v-radio-group>
+
+              <div class="text-caption text-grey mb-1">{{ t('parentActivationMode') }}</div>
+              <v-radio-group
+                :model-value="state.parentActivationMode"
+                density="compact"
+                color="primary"
+                hide-details
+                class="mb-4"
+                data-testid="parent-activation-mode"
+                @update:model-value="(val) => isParentActivationMode(val) && setParentActivationMode(val)"
+              >
+                <v-radio :label="t('parentActivationNone')" value="none"></v-radio>
+                <v-radio :label="t('parentActivationConfirm')" value="confirm"></v-radio>
+                <v-radio :label="t('parentActivationAuto')" value="auto"></v-radio>
               </v-radio-group>
 
               <v-switch

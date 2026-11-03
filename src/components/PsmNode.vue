@@ -10,13 +10,14 @@ import {
   savePrompts,
   startEdit,
   addItem,
-  toggleGroupEnabled,
+  requestToggleEnabled,
   setGroupChildrenEnabled,
-  toggleItemEnabled,
   toggleGroupExclusive,
   toggleGroupLock,
   toggleGroupHidden,
   resetWeight,
+  containsDuplicatePrompt,
+  isDuplicateHighlighted,
   beginDrag,
   endDrag,
   finalizeCrossListMove,
@@ -36,6 +37,8 @@ const props = defineProps<{
   parentGroup?: PsmItem;
   /** 祖先グループがロック中かどうか (グループロック機能。再帰的に子へ伝播する) */
   locked?: boolean;
+  /** 祖先に非表示グループがあるかどうか (非表示グループの配下は重複チェックの対象外) */
+  isParentHidden?: boolean;
 }>();
 const openContextMenu = inject<Function>("psm-context-menu");
 const searchQuery = inject<Ref<string>>("search-query", ref(""));
@@ -91,6 +94,14 @@ const isHiddenByGroupSetting = computed(() => {
   return !!props.item.is_group && !!props.item.isHidden && !state.showHiddenGroups;
 });
 
+/**
+ * 自身または祖先が非表示グループかどうか (子要素へ isParentHidden として渡す)
+ * 「非表示グループの表示」や検索で表示されている場合も、重複チェックの対象外として扱う
+ */
+const isInHiddenGroup = computed(() => {
+  return !!props.isParentHidden || (!!props.item.is_group && !!props.item.isHidden);
+});
+
 const isVisible = computed(() => {
   // 検索中は非表示フラグを無視し、検索マッチのみで可視性を決定する
   // (非表示にした場所の中身が検索で見つからなくなる事故を防ぐ)
@@ -142,14 +153,23 @@ const childIsParentDisabled = computed(() => {
   return !props.item.enabled || props.isParentDisabled;
 });
 
+/**
+ * 自身は有効だが、祖先グループが無効なためプロンプトに反映されない状態か
+ * (自身が無効な場合と見分けられるよう、目印と理由を表示する)
+ */
+const isBlockedByParent = computed(() => {
+  return props.item.enabled && !!props.isParentDisabled;
+});
+
+// 親グループが無効な場合の扱い (何もしない/確認/祖先も有効化) はストア側の設定に従う
 const handleToggle = () => {
-  if (props.isParentDisabled || effectiveLocked.value) return;
-  toggleItemEnabled(props.item, props.parentChildren, props.parentGroup);
+  if (effectiveLocked.value) return;
+  requestToggleEnabled(props.item);
 };
 
 const handleGroupToggle = () => {
-  if (props.isParentDisabled || effectiveLocked.value) return;
-  toggleGroupEnabled(props.item);
+  if (effectiveLocked.value) return;
+  requestToggleEnabled(props.item);
 };
 
 const handleGroupExclusiveToggle = (val: unknown) => {
@@ -252,7 +272,9 @@ const iconSize = computed(() => {
  * 見切れてしまう。重み表示分の幅をあらかじめ差し引いて確保する
  */
 const leafLabelMaxWidth = computed(() => {
-  return props.item.weight !== 1.0 ? "80px" : "110px";
+  // 親グループが無効な目印アイコンを表示する場合も、同様にその幅を差し引く
+  const reserved = (props.item.weight !== 1.0 ? 30 : 0) + (isBlockedByParent.value ? 20 : 0);
+  return `${110 - reserved}px`;
 });
 const handleClickHeader = () => {
   state.focusedItemId = props.item.id;
@@ -308,15 +330,31 @@ const isBreak = computed(() => {
 
 const isDuplicate = computed(() => {
   if (props.item.is_group) return false;
-  if (!isEffectiveEnabled.value) return false;
-  const text = (props.item.content || "").trim();
-  return !!text && state.duplicateTexts.has(text);
+  if (!isEffectiveEnabled.value || isInHiddenGroup.value) return false;
+  return isDuplicateHighlighted(props.item.content);
+});
+
+/**
+ * 重複プロンプトの強調レベル (重複していない、または強調中でない場合は null)
+ * チップの色に加えて枠も強調し、グループ枠の強調からどのプロンプトが重複しているかをたどれるようにする
+ */
+const leafDuplicateLevel = computed(() => {
+  return isDuplicate.value ? state.duplicateHighlightLevel : null;
+});
+
+/**
+ * 配下に重複プロンプトがある場合の強調レベル (無い場合は null)
+ * 閉じたグループや入れ子の奥にある重複も枠をたどって見つけられるよう、祖先グループすべてを強調する
+ */
+const groupDuplicateLevel = computed(() => {
+  if (!props.item.is_group || !isEffectiveEnabled.value || isInHiddenGroup.value || !state.duplicateHighlightLevel) return null;
+  return containsDuplicatePrompt(props.item.children ?? []) ? state.duplicateHighlightLevel : null;
 });
 
 const chipColor = computed(() => {
   if (!isEffectiveEnabled.value) return 'grey';
-  if (isDuplicate.value && state.duplicateHighlightLevel) {
-    return state.duplicateHighlightLevel === "warn" ? "warning" : "error";
+  if (leafDuplicateLevel.value) {
+    return leafDuplicateLevel.value === "warn" ? "warning" : "error";
   }
   return isDynamicPrompt.value ? 'cyan-accent-2' : 'primary';
 });
@@ -382,7 +420,11 @@ const moveSelf = (dir: 'up' | 'down') => {
         isEffectiveEnabled ? 'bg-grey-darken-4' : 'bg-grey-darken-4 opacity-50',
         item.isRandom ? 'psm-node__group--random' : '',
         effectiveLocked ? 'psm-node__group--locked' : '',
-        item.isHidden ? 'psm-node__group--hidden' : ''
+        item.isHidden ? 'psm-node__group--hidden' : '',
+        {
+          'psm-node__group--duplicate-warn': groupDuplicateLevel === 'warn',
+          'psm-node__group--duplicate-error': groupDuplicateLevel === 'error'
+        }
       ]"
     >
       <div class="psm-node__add-zone d-flex justify-start ga-2 mb-1">
@@ -445,7 +487,7 @@ const moveSelf = (dir: 'up' | 'down') => {
 
         <v-checkbox-btn
           :model-value="item.enabled"
-          :disabled="isParentDisabled || effectiveLocked"
+          :disabled="effectiveLocked"
           density="compact"
           class="mr-2 flex-grow-0"
           color="primary"
@@ -472,6 +514,15 @@ const moveSelf = (dir: 'up' | 'down') => {
         >
           {{ item.name }}
         </span>
+
+        <v-icon
+          v-if="isBlockedByParent"
+          size="small"
+          class="ml-1 flex-shrink-0"
+          color="orange-lighten-2"
+          :title="t('blockedByParentHint')"
+          data-testid="blocked-by-parent-icon"
+        >mdi-link-variant-off</v-icon>
 
         <!-- 非表示グループが「非表示グループの表示」により再表示されている際の目印 -->
         <v-icon
@@ -658,6 +709,7 @@ const moveSelf = (dir: 'up' | 'down') => {
               :is-parent-disabled="childIsParentDisabled"
               :parent-group="item"
               :locked="effectiveLocked"
+              :is-parent-hidden="isInHiddenGroup"
             />
 
           </template>
@@ -734,8 +786,12 @@ const moveSelf = (dir: 'up' | 'down') => {
             :variant="isEffectiveEnabled && !isDuplicate ? 'tonal' : 'elevated'"
             :label="!isDynamicPrompt"
             size="small"
-            class="ma-0"
-            :class="{ 'psm-node--focused': state.focusedItemId === item.id }"
+            class="psm-node__chip ma-0"
+            :class="{
+              'psm-node--focused': state.focusedItemId === item.id,
+              'psm-node__chip--duplicate-warn': leafDuplicateLevel === 'warn',
+              'psm-node__chip--duplicate-error': leafDuplicateLevel === 'error'
+            }"
             @click.stop="handleClickLeaf"
             @dblclick.stop="startEdit(item)"
             @contextmenu.prevent.stop="
@@ -754,7 +810,8 @@ const moveSelf = (dir: 'up' | 'down') => {
               :style="{ maxWidth: leafLabelMaxWidth }"
               :class="[
                 {
-                  'text-decoration-line-through text-disabled': !isEffectiveEnabled,
+                  'text-decoration-line-through': !item.enabled,
+                  'text-disabled': !isEffectiveEnabled,
                   'font-italic': isDynamicPrompt && isEffectiveEnabled
                 },
                 scaleTextClass
@@ -763,6 +820,14 @@ const moveSelf = (dir: 'up' | 'down') => {
             >
               {{ item.name || item.memo || item.content }}
             </span>
+            <!-- 自身は有効だが親グループが無効で反映されない目印 (取り消し線の有無と合わせて、自身が無効な場合と見分ける) -->
+            <v-icon
+              v-if="isBlockedByParent"
+              :size="iconSize"
+              class="ml-1 flex-shrink-0"
+              color="orange-lighten-2"
+              data-testid="blocked-by-parent-icon"
+            >mdi-link-variant-off</v-icon>
             <!-- Dynamic Prompt Indicator -->
             <span
               v-if="item.weight !== 1.0"
@@ -797,6 +862,9 @@ const moveSelf = (dir: 'up' | 'down') => {
           <div v-if="item.memo" class="psm-node__tooltip-row">
             <div class="psm-node__tooltip-label">{{ t('memo') }}</div>
             <div class="psm-node__tooltip-value">{{ item.memo }}</div>
+          </div>
+          <div v-if="isBlockedByParent" class="psm-node__tooltip-warning" data-testid="leaf-tooltip-blocked">
+            {{ t('blockedByParentHint') }}
           </div>
           <div class="psm-node__tooltip-hint">{{ t('doubleClickToEdit') }}</div>
         </div>
@@ -931,6 +999,19 @@ div.psm-node {
       opacity: 0.6;
       border-style: dotted !important;
     }
+
+    /* 重複プロンプトを含むグループ: プロンプトのチップと同じ強調色の太枠で囲む
+       (ランダム・ロック・非表示の枠より優先させるため、それらより後に定義する。
+        Vuetify の border ユーティリティが !important のため、上書きにも !important が必要) */
+    &--duplicate-warn {
+      border: 2px solid rgb(var(--v-theme-warning)) !important;
+      box-shadow: 0 0 6px rgba(var(--v-theme-warning), 0.45);
+    }
+
+    &--duplicate-error {
+      border: 2px solid rgb(var(--v-theme-error)) !important;
+      box-shadow: 0 0 6px rgba(var(--v-theme-error), 0.45);
+    }
   }
 
   &__drop-zone {
@@ -1026,6 +1107,24 @@ div.psm-node {
   &__leaf-container {
     vertical-align: top;
     max-width: 180px; /* 横並びが崩れないための制限 */
+  }
+
+  /* 重複プロンプト: どれが重複しているか一目で分かるよう、チップの外側に強調色の枠と光彩を付ける
+     (チップの塗りも同じ強調色のため、背景色の細い隙間を挟んで枠が埋もれないようにする。
+      box-shadow で描くため、内側に描かれるフォーカス枠 (outline) とは重ならない)
+     ※ v-chip はコンポーネントのため、&__xxx (div.psm-node__xxx) ではなくクラスのみのセレクタで指定する */
+  .psm-node__chip--duplicate-warn {
+    box-shadow:
+      0 0 0 1px $color-bg-base,
+      0 0 0 3px rgb(var(--v-theme-warning)),
+      0 0 8px 1px rgba(var(--v-theme-warning), 0.6);
+  }
+
+  .psm-node__chip--duplicate-error {
+    box-shadow:
+      0 0 0 1px $color-bg-base,
+      0 0 0 3px rgb(var(--v-theme-error)),
+      0 0 8px 1px rgba(var(--v-theme-error), 0.6);
   }
 
   /* BREAK区切り (<hr>のように横幅いっぱい)
@@ -1167,5 +1266,13 @@ div.psm-node {
   font-size: $font-size-xs;
   color: inherit;
   opacity: 0.75;
+}
+
+/* 親グループが無効で反映されない理由 (背景の明暗に関わらず読めるよう、色は変えず太字で目立たせる) */
+.psm-node__tooltip-warning {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  font-weight: bold;
+  color: inherit;
 }
 </style>

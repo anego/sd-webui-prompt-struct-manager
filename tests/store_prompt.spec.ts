@@ -341,6 +341,234 @@ describe("detectDuplicates - 重複プロンプト検出", () => {
     // 実際に「有効」な masterpiece は1つだけになるため、重複は検出されないべき
     expect(duplicates.size).toBe(0);
   });
+
+  it("2.12 末尾にカンマが付いた BREAK や AND も制御トークンとして重複検出から除外されること", () => {
+    // Arrange
+    state.positive = [
+      { id: 1, name: "b1", content: "BREAK,", enabled: true, weight: 1.0, is_group: false },
+      { id: 2, name: "b2", content: "BREAK,", enabled: true, weight: 1.0, is_group: false },
+      { id: 3, name: "b3", content: "break ,", enabled: true, weight: 1.0, is_group: false },
+      { id: 4, name: "a1", content: "AND,", enabled: true, weight: 1.0, is_group: false },
+      { id: 5, name: "a2", content: "AND,", enabled: true, weight: 1.0, is_group: false },
+    ];
+    state.negative = [
+      { id: 6, name: "b4", content: "BREAK,", enabled: true, weight: 1.0, is_group: false },
+    ];
+
+    // Act
+    const duplicates = detectDuplicates();
+
+    // Assert
+    expect(duplicates.size).toBe(0);
+  });
+
+  it("2.13 非表示グループ (入れ子の配下を含む) にあるプロンプトは重複チェックの対象外になること", () => {
+    // Arrange
+    state.positive = [
+      { id: 1, name: "p1", content: "1girl", enabled: true, weight: 1.0, is_group: false },
+      {
+        id: 2, name: "Hidden", content: "", enabled: true, is_group: true, isHidden: true,
+        children: [
+          { id: 3, name: "p2", content: "1girl", enabled: true, weight: 1.0, is_group: false },
+          {
+            id: 4, name: "Nested", content: "", enabled: true, is_group: true,
+            children: [
+              { id: 5, name: "p3", content: "1girl", enabled: true, weight: 1.0, is_group: false },
+            ],
+          },
+        ],
+      },
+      {
+        id: 6, name: "Visible", content: "", enabled: true, is_group: true,
+        children: [
+          { id: 7, name: "p4", content: "smile", enabled: true, weight: 1.0, is_group: false },
+        ],
+      },
+    ];
+    state.negative = [
+      { id: 8, name: "n1", content: "smile", enabled: true, weight: 1.0, is_group: false },
+    ];
+
+    // Act
+    const duplicates = detectDuplicates();
+
+    // Assert
+    // 非表示グループ配下の 1girl は数えず、表示中のグループにある smile の重複だけを検出する
+    expect([...duplicates]).toEqual(["smile"]);
+  });
+
+  it("2.15 末尾のカンマの有無だけが異なるプロンプトは、同じプロンプトとして重複検出されること", () => {
+    // Arrange
+    state.positive = [
+      { id: 1, name: "p1", content: "on stomach", enabled: true, weight: 1.0, is_group: false },
+      {
+        id: 2, name: "Pose", content: "", enabled: true, is_group: true,
+        children: [
+          { id: 3, name: "p2", content: "on stomach,", enabled: true, weight: 1.0, is_group: false },
+        ],
+      },
+      { id: 4, name: "p3", content: " masterpiece, best quality , ", enabled: true, weight: 1.0, is_group: false },
+    ];
+    state.negative = [
+      { id: 5, name: "n1", content: "masterpiece, best quality", enabled: true, weight: 1.0, is_group: false },
+    ];
+
+    // Act
+    const duplicates = detectDuplicates();
+
+    // Assert
+    // 末尾のカンマと前後の空白を除いたテキストで記録される
+    expect([...duplicates].sort()).toEqual(["masterpiece, best quality", "on stomach"]);
+  });
+});
+
+import { containsDuplicatePrompt, isDuplicateHighlighted, clearDuplicateHighlight } from "../src/store";
+
+describe("isDuplicateHighlighted - 重複として強調中のプロンプトの判定 (プロンプトの枠の強調表示用)", () => {
+  it("2.9 強調中の重複テキストと、前後の空白を除いて一致する内容のみ true になること", () => {
+    // Arrange
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const exact = isDuplicateHighlighted("1girl");
+    const padded = isDuplicateHighlighted("  1girl  ");
+    const other = isDuplicateHighlighted("1girls");
+
+    // Assert
+    expect(exact).toBe(true);
+    expect(padded).toBe(true);
+    expect(other).toBe(false);
+  });
+
+  it("2.10 空の内容や空白のみの内容は、強調中のテキストがあっても false になること", () => {
+    // Arrange
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const empty = isDuplicateHighlighted("");
+    const blank = isDuplicateHighlighted("   ");
+
+    // Assert
+    expect(empty).toBe(false);
+    expect(blank).toBe(false);
+  });
+
+  it("2.16 末尾にカンマが付いたプロンプトも、カンマを除いたテキストが強調中なら true になること", () => {
+    // Arrange
+    state.duplicateTexts.add("on stomach");
+
+    // Act
+    const withComma = isDuplicateHighlighted("on stomach,");
+    const withSpacedComma = isDuplicateHighlighted("on stomach , ");
+
+    // Assert
+    expect(withComma).toBe(true);
+    expect(withSpacedComma).toBe(true);
+  });
+
+  it("2.11 clearDuplicateHighlight で強調を解除すると false になること", () => {
+    // Arrange
+    state.duplicateTexts.add("1girl");
+    state.duplicateHighlightLevel = "error";
+
+    // Act
+    clearDuplicateHighlight();
+    const result = isDuplicateHighlighted("1girl");
+
+    // Assert
+    expect(result).toBe(false);
+  });
+});
+
+describe("containsDuplicatePrompt - 重複プロンプトを含むグループの判定 (グループ枠の強調表示用)", () => {
+  const leaf = (id: number, content: string, enabled = true): PsmItem => ({
+    id, name: `p${id}`, content, enabled, weight: 1.0, is_group: false,
+  });
+  const group = (id: number, children: PsmItem[], enabled = true): PsmItem => ({
+    id, name: `g${id}`, content: "", enabled, is_group: true, children,
+  });
+
+  it("2.4 入れ子の奥に重複プロンプトがある場合、外側のグループでも内側のグループでも true になること", () => {
+    // Arrange
+    const inner = group(11, [leaf(12, "1girl")]);
+    const outer = group(10, [leaf(13, "masterpiece"), inner]);
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const outerResult = containsDuplicatePrompt(outer.children!);
+    const innerResult = containsDuplicatePrompt(inner.children!);
+
+    // Assert
+    expect(outerResult).toBe(true);
+    expect(innerResult).toBe(true);
+  });
+
+  it("2.5 重複プロンプトを含まないグループは false になること", () => {
+    // Arrange
+    const other = group(20, [leaf(21, "masterpiece"), group(22, [leaf(23, "smile")])]);
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const result = containsDuplicatePrompt(other.children!);
+
+    // Assert
+    expect(result).toBe(false);
+  });
+
+  it("2.6 重複テキストのプロンプトが無効、または無効なグループの配下にある場合は false になること", () => {
+    // Arrange
+    const disabledLeafGroup = group(30, [leaf(31, "1girl", false)]);
+    const disabledChildGroup = group(32, [group(33, [leaf(34, "1girl")], false)]);
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const disabledLeafResult = containsDuplicatePrompt(disabledLeafGroup.children!);
+    const disabledChildResult = containsDuplicatePrompt(disabledChildGroup.children!);
+
+    // Assert
+    expect(disabledLeafResult).toBe(false);
+    expect(disabledChildResult).toBe(false);
+  });
+
+  it("2.7 プロンプトの前後の空白を除いて重複テキストと照合すること (チップの強調表示と同じ判定)", () => {
+    // Arrange
+    const target = group(40, [leaf(41, "  1girl  ")]);
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const result = containsDuplicatePrompt(target.children!);
+
+    // Assert
+    expect(result).toBe(true);
+  });
+
+  it("2.8 clearDuplicateHighlight で強調を解除すると false になること", () => {
+    // Arrange
+    const target = group(50, [leaf(51, "1girl")]);
+    state.duplicateTexts.add("1girl");
+    state.duplicateHighlightLevel = "warn";
+
+    // Act
+    clearDuplicateHighlight();
+    const result = containsDuplicatePrompt(target.children!);
+
+    // Assert
+    expect(result).toBe(false);
+  });
+
+  it("2.14 重複テキストのプロンプトが非表示グループ (入れ子の配下を含む) にしか無い場合は false になること", () => {
+    // Arrange
+    const hidden = group(61, [leaf(62, "1girl"), group(63, [leaf(64, "1girl")])]);
+    hidden.isHidden = true;
+    const outer = group(60, [leaf(65, "masterpiece"), hidden]);
+    state.duplicateTexts.add("1girl");
+
+    // Act
+    const result = containsDuplicatePrompt(outer.children!);
+
+    // Assert
+    expect(result).toBe(false);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -3270,5 +3498,409 @@ describe("E2E から移管: グループ内一括有効/無効・重複チェッ
     );
     expect(state.duplicateTexts.size).toBe(0);
     expect(state.duplicateHighlightLevel).toBeNull();
+  });
+});
+
+// -------------------------------------------------------------------------
+// 22. 親グループが無効な項目の有効化 (祖先グループの自動有効化)
+// -------------------------------------------------------------------------
+// 祖先グループが無効だと配下の項目は有効にしても反映されないため、有効にしようとしたときの
+// 挙動を設定 (何もしない/確認する/自動で有効にする) で選べるようにした。
+// マウス・キーボード共通の入口 (requestToggleEnabled) と、通知からの確定・元に戻すを検証する。
+import {
+  findNodePath,
+  getDisabledAncestors,
+  requestToggleEnabled,
+  activateWithAncestors,
+  confirmParentActivation,
+  confirmParentActivationAlways,
+  undoParentActivation,
+  dismissParentActivationNotice,
+  setParentActivationMode,
+} from "../src/store";
+import { useKeyboardNav } from "../src/composables/useKeyboardNav";
+
+describe("親グループが無効な項目の有効化", () => {
+  const leaf = (id: number, enabled = true): PsmItem => ({
+    id, name: `n${id}`, content: `tag${id}`, enabled, weight: 1.0, is_group: false,
+  });
+  const grp = (
+    id: number,
+    children: PsmItem[],
+    options: { enabled?: boolean; isExclusive?: boolean; isLocked?: boolean } = {},
+  ): PsmItem => ({
+    id,
+    name: `g${id}`,
+    content: "",
+    enabled: options.enabled ?? true,
+    weight: 1.0,
+    is_group: true,
+    isOpen: true,
+    isExclusive: options.isExclusive,
+    isLocked: options.isLocked,
+    children,
+  });
+  /** 経路から ID 付きでノードを取り出す (state 経由のリアクティブなノードを参照するため) */
+  const nodeOf = (id: number): PsmItem => {
+    const path = findNodePath(id);
+    if (!path) throw new Error(`テスト用ツリーに ID ${id} のノードがありません`);
+    return path[path.length - 1].node;
+  };
+  const saveCalls = () => fetchMock.mock.calls.filter((c) => c[0] === "/psm/save-prompts");
+  /** 保存の完了を待ってから通知を設定する処理があるため、非同期処理を1周させる */
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    state.selectedFile = "activation.json";
+    state.parentActivationMode = "confirm";
+    state.parentActivationNotice = null;
+    state.selectedProfileName = "";
+  });
+
+  it("22.1 findNodePath: ルート直下から対象自身までの経路と、各ノードを含む兄弟リストを返すこと", () => {
+    // Arrange
+    state.positive = [leaf(1), grp(2, [grp(3, [leaf(4), leaf(5)])])];
+    state.negative = [grp(10, [leaf(11)])];
+
+    // Act
+    const path = findNodePath(5);
+    const negativePath = findNodePath(11);
+    const missing = findNodePath(999);
+
+    // Assert
+    expect(path?.map((e) => e.node.id)).toEqual([2, 3, 5]);
+    expect(path?.[2].siblings.map((n) => n.id)).toEqual([4, 5]);
+    expect(negativePath?.map((e) => e.node.id)).toEqual([10, 11]);
+    expect(missing).toBeNull();
+  });
+
+  it("22.2 getDisabledAncestors: 無効な祖先グループだけを外側から順に返すこと", () => {
+    // Arrange: 2 (無効) > 3 (有効) > 4 (無効) > 5
+    state.positive = [grp(2, [grp(3, [grp(4, [leaf(5)], { enabled: false })])], { enabled: false })];
+
+    // Act
+    const ancestors = getDisabledAncestors(5);
+
+    // Assert
+    expect(ancestors.map((g) => g.id)).toEqual([2, 4]);
+  });
+
+  it("22.3 祖先がすべて有効な場合は従来どおり切り替わり、択一グループの兄弟は無効になり、通知は出ないこと", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, true), leaf(3, false)], { isExclusive: true })];
+
+    // Act
+    await requestToggleEnabled(nodeOf(3));
+
+    // Assert
+    expect(nodeOf(3).enabled).toBe(true);
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(state.parentActivationNotice).toBeNull();
+    expect(saveCalls()).toHaveLength(1);
+  });
+
+  it("22.4 設定が「何もしない」の場合: 何も変更・保存せず、反映されない理由の通知だけを出すこと", async () => {
+    // Arrange
+    state.parentActivationMode = "none";
+    state.positive = [grp(1, [leaf(2, false)], { enabled: false })];
+
+    // Act
+    await requestToggleEnabled(nodeOf(2));
+
+    // Assert
+    expect(nodeOf(1).enabled).toBe(false);
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(state.parentActivationNotice).toEqual({ kind: "blocked", itemId: 2, groupNames: ["g1"] });
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it("22.5 設定が「確認する」の場合: 確認の通知を出し、「親も有効にする」で祖先ごと有効になって保存されること", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, false)], { enabled: false })];
+
+    // Act: 有効化の要求 (この時点では何も変えない)
+    await requestToggleEnabled(nodeOf(2));
+
+    // Assert
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(state.parentActivationNotice?.kind).toBe("confirm");
+    expect(saveCalls()).toHaveLength(0);
+
+    // Act: 通知の「親も有効にする」
+    await confirmParentActivation();
+
+    // Assert
+    expect(nodeOf(1).enabled).toBe(true);
+    expect(nodeOf(2).enabled).toBe(true);
+    expect(state.parentActivationNotice?.kind).toBe("activated");
+    expect(saveCalls()).toHaveLength(1);
+  });
+
+  it("22.6 設定が「自動」の場合: 多段の祖先を外側から順に有効にし、以前から有効だった兄弟が一緒に反映される件数を通知すること", async () => {
+    // Arrange: 1 (無効) > [2 (無効) > [対象 3 (無効), 兄弟 4 (有効)], 5 (有効)]
+    state.parentActivationMode = "auto";
+    state.positive = [grp(1, [grp(2, [leaf(3, false), leaf(4, true)], { enabled: false }), leaf(5, true)], { enabled: false })];
+
+    // Act
+    await requestToggleEnabled(nodeOf(3));
+
+    // Assert
+    expect(nodeOf(1).enabled).toBe(true);
+    expect(nodeOf(2).enabled).toBe(true);
+    expect(nodeOf(3).enabled).toBe(true);
+    const notice = state.parentActivationNotice;
+    expect(notice?.kind).toBe("activated");
+    if (notice?.kind !== "activated") return;
+    expect(notice.groupNames).toEqual(["g1", "g2"]);
+    expect(notice.extraCount).toBe(2); // 兄弟 4 と、祖先 1 直下の 5
+    expect(getCompiledPrompts(state.positive)).toBe("tag3, tag4, tag5");
+  });
+
+  it("22.7 有効にした祖先の親が択一グループの場合: その祖先の兄弟が無効になること", async () => {
+    // Arrange: 衣装 1 (択一) > [制服 2 (有効) > [10], 私服 3 (無効) > [対象 11]]
+    state.parentActivationMode = "auto";
+    state.positive = [
+      grp(1, [grp(2, [leaf(10, true)]), grp(3, [leaf(11, false)], { enabled: false })], { isExclusive: true }),
+    ];
+
+    // Act
+    await requestToggleEnabled(nodeOf(11));
+
+    // Assert
+    expect(nodeOf(3).enabled).toBe(true);
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(getCompiledPrompts(state.positive)).toBe("tag11");
+  });
+
+  it("22.8 undoParentActivation: 祖先の有効化と択一による兄弟の無効化をすべて元に戻し、保存して通知を閉じること", async () => {
+    // Arrange
+    state.parentActivationMode = "auto";
+    state.positive = [
+      grp(1, [grp(2, [leaf(10, true)]), grp(3, [leaf(11, false)], { enabled: false })], { isExclusive: true }),
+    ];
+    await requestToggleEnabled(nodeOf(11));
+    const savesBeforeUndo = saveCalls().length;
+
+    // Act
+    await undoParentActivation();
+
+    // Assert
+    expect(nodeOf(2).enabled).toBe(true);
+    expect(nodeOf(3).enabled).toBe(false);
+    expect(nodeOf(11).enabled).toBe(false);
+    expect(state.parentActivationNotice).toBeNull();
+    expect(saveCalls()).toHaveLength(savesBeforeUndo + 1);
+  });
+
+  it("22.9 親グループが無効でも、有効な項目を無効にする操作はそのまま行われ、祖先は変わらないこと", async () => {
+    // Arrange
+    state.parentActivationMode = "auto";
+    state.positive = [grp(1, [leaf(2, true)], { enabled: false })];
+
+    // Act
+    await requestToggleEnabled(nodeOf(2));
+
+    // Assert
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(nodeOf(1).enabled).toBe(false);
+    expect(state.parentActivationNotice).toBeNull();
+  });
+
+  it("22.10 対象がグループの場合: 祖先も有効にし、対象グループ自身の配下は件数に含めないこと", async () => {
+    // Arrange: 1 (無効) > [対象グループ 2 (無効) > [3 (有効)], 4 (有効)]
+    state.parentActivationMode = "auto";
+    state.positive = [grp(1, [grp(2, [leaf(3, true)], { enabled: false }), leaf(4, true)], { enabled: false })];
+
+    // Act
+    await requestToggleEnabled(nodeOf(2));
+
+    // Assert
+    expect(nodeOf(1).enabled).toBe(true);
+    expect(nodeOf(2).enabled).toBe(true);
+    const notice = state.parentActivationNotice;
+    if (notice?.kind !== "activated") throw new Error("祖先を有効にした通知になっていません");
+    expect(notice.extraCount).toBe(1); // 4 のみ (3 は対象グループ自身の配下)
+  });
+
+  it("22.11 祖先がロック中の場合: 設定に関わらず何も変更せず、通知も出さないこと", async () => {
+    // Arrange
+    state.parentActivationMode = "auto";
+    state.positive = [grp(1, [leaf(2, false)], { enabled: false, isLocked: true })];
+
+    // Act
+    await requestToggleEnabled(nodeOf(2));
+
+    // Assert
+    expect(nodeOf(1).enabled).toBe(false);
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(state.parentActivationNotice).toBeNull();
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it("22.12 confirmParentActivationAlways: 設定を「自動」にしてローカル設定へ保存し、確認待ちの項目を祖先ごと有効にすること", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, false)], { enabled: false })];
+    await requestToggleEnabled(nodeOf(2));
+
+    // Act
+    await confirmParentActivationAlways();
+
+    // Assert
+    expect(state.parentActivationMode).toBe("auto");
+    expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+      "psm_settings",
+      expect.stringContaining('"parent_activation_mode":"auto"'),
+    );
+    expect(nodeOf(1).enabled).toBe(true);
+    expect(nodeOf(2).enabled).toBe(true);
+  });
+
+  it("22.13 確認待ちの項目が確定前に削除されていた場合: 何も変更せず通知を閉じること", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, false)], { enabled: false })];
+    await requestToggleEnabled(nodeOf(2));
+    nodeOf(1).children!.splice(0, 1);
+
+    // Act
+    await confirmParentActivation();
+
+    // Assert
+    expect(nodeOf(1).enabled).toBe(false);
+    expect(state.parentActivationNotice).toBeNull();
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it("22.14 activateWithAncestors: 変更するものが無い場合は保存せず、通知も閉じること", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, true)])];
+    state.parentActivationNotice = { kind: "confirm", itemId: 2, groupNames: ["g1"] };
+
+    // Act
+    await activateWithAncestors(2);
+
+    // Assert
+    expect(saveCalls()).toHaveLength(0);
+    expect(state.parentActivationNotice).toBeNull();
+  });
+
+  it("22.15 種類の違う通知に対する確定・元に戻すは何もしないこと、dismiss で通知が閉じること", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, false)], { enabled: false })];
+    state.parentActivationNotice = { kind: "blocked", itemId: 2, groupNames: ["g1"] };
+
+    // Act
+    await confirmParentActivation();
+    await undoParentActivation();
+
+    // Assert
+    expect(nodeOf(2).enabled).toBe(false);
+    expect(saveCalls()).toHaveLength(0);
+    expect(state.parentActivationNotice?.kind).toBe("blocked");
+
+    // Act
+    dismissParentActivationNotice();
+
+    // Assert
+    expect(state.parentActivationNotice).toBeNull();
+  });
+
+  it("22.16 setParentActivationMode / loadSettingsLocal: 設定が保存・復元され、不明な値は無視されること", () => {
+    // Arrange & Act: 保存
+    setParentActivationMode("none");
+
+    // Assert
+    expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+      "psm_settings",
+      expect.stringContaining('"parent_activation_mode":"none"'),
+    );
+
+    // Arrange & Act: 有効な値の復元
+    state.parentActivationMode = "confirm";
+    mockLocalStorage.getItem.mockReturnValueOnce(JSON.stringify({ parent_activation_mode: "auto" }));
+    loadSettingsLocal();
+
+    // Assert
+    expect(state.parentActivationMode).toBe("auto");
+
+    // Arrange & Act: 不明な値は無視して現在の値を保つ
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockLocalStorage.getItem.mockReturnValueOnce(JSON.stringify({ parent_activation_mode: "always" }));
+    loadSettingsLocal();
+
+    // Assert
+    expect(state.parentActivationMode).toBe("auto");
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("22.17 loadPrompts: 別のファイルを読み込むと、前のツリーを指す通知は閉じられること", async () => {
+    // Arrange
+    state.parentActivationNotice = { kind: "confirm", itemId: 2, groupNames: ["g1"] };
+    state.lastFile = "activation.json";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ positive: [], negative: [], profiles: [] }),
+    } as Response);
+
+    // Act
+    await loadPrompts();
+
+    // Assert
+    expect(state.parentActivationNotice).toBeNull();
+  });
+
+  describe("キーボード (Space) での切り替え", () => {
+    const pressSpace = () => {
+      const { handleGlobalKeydown } = useKeyboardNav();
+      const event = {
+        key: " ",
+        isComposing: false,
+        target: { tagName: "DIV", classList: { contains: () => false } },
+        preventDefault: vi.fn(),
+      };
+      handleGlobalKeydown(event as unknown as KeyboardEvent);
+    };
+
+    beforeEach(() => {
+      state.isVisible = true;
+      state.isEditing = false;
+      state.isDeleting = false;
+      state.disableAllConfirm = null;
+      state.posOpen = true;
+    });
+
+    afterEach(() => {
+      state.isVisible = false;
+      state.focusedItemId = null;
+    });
+
+    it("22.18 択一グループ内のプロンプトを Space で有効にすると、マウスと同じく兄弟が無効になること", async () => {
+      // Arrange
+      state.positive = [grp(1, [leaf(2, true), leaf(3, false)], { isExclusive: true })];
+      state.focusedItemId = 3;
+
+      // Act
+      pressSpace();
+      await flush();
+
+      // Assert
+      expect(nodeOf(3).enabled).toBe(true);
+      expect(nodeOf(2).enabled).toBe(false);
+    });
+
+    it("22.19 親グループが無効なプロンプトを Space で有効にしようとすると、設定に従って確認の通知が出ること", async () => {
+      // Arrange
+      state.positive = [grp(1, [leaf(2, false)], { enabled: false })];
+      state.focusedItemId = 2;
+
+      // Act
+      pressSpace();
+      await flush();
+
+      // Assert
+      expect(nodeOf(2).enabled).toBe(false);
+      expect(state.parentActivationNotice?.kind).toBe("confirm");
+    });
   });
 });

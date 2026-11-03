@@ -35,6 +35,7 @@ import PsmContextMenu from "./components/PsmContextMenu.vue";
 import PsmGroupMap from "./components/PsmGroupMap.vue";
 import PsmGenerateConfirmDialog from "./components/PsmGenerateConfirmDialog.vue";
 import PsmDisableAllConfirmDialog from "./components/PsmDisableAllConfirmDialog.vue";
+import PsmParentActivationNotice from "./components/PsmParentActivationNotice.vue";
 import PsmDuplicateConfirmDialog from "./components/PsmDuplicateConfirmDialog.vue";
 import PsmSetupWizard from "./components/PsmSetupWizard.vue";
 import PsmPreviewModal from "./components/PsmPreviewModal.vue";
@@ -837,6 +838,8 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         attach
         data-testid="gen-profile-snackbar"
       >{{ genProfileSnackbar.text }}</v-snackbar>
+
+      <PsmParentActivationNotice />
 
       <PsmDuplicateConfirmDialog
         v-model="duplicateDialog.show"

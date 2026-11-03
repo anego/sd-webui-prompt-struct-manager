@@ -149,4 +149,48 @@ describe("buildGroupMap - グループマップの構築", () => {
     // Act & Assert
     expect(() => buildGroupMap(positive, [])).not.toThrow();
   });
+
+  it("1.11 effectiveEnabled: 自身と祖先がすべて有効なグループのみ true になること", () => {
+    // Arrange: 有効な親 > [有効な子, 無効な子]
+    const positive = [grp(1, "Parent", [grp(2, "OnChild", [leaf(3)]), grp(4, "OffChild", [leaf(5)], false)])];
+
+    // Act
+    const groups = groupsOf(buildGroupMap(positive, []));
+    const byId = (id: number) => groups.find((g) => g.id === id)!;
+
+    // Assert
+    expect(byId(1).effectiveEnabled).toBe(true);
+    expect(byId(2).effectiveEnabled).toBe(true);
+    expect(byId(4).effectiveEnabled).toBe(false);
+  });
+
+  it("1.12 effectiveEnabled: 祖先が無効なら、自身が有効でも子孫グループはすべて false になること (自身の enabled は保持)", () => {
+    // Arrange: 無効な祖父 > 有効な親 > 有効な子
+    const child = grp(3, "Child", [leaf(4)]);
+    const positive = [grp(1, "Grandparent", [grp(2, "Parent", [child])], false)];
+
+    // Act
+    const groups = groupsOf(buildGroupMap(positive, []));
+    const byId = (id: number) => groups.find((g) => g.id === id)!;
+
+    // Assert: 自身の状態 (enabled) と実際に反映されるか (effectiveEnabled) を区別して保持する
+    expect(byId(2).enabled).toBe(true);
+    expect(byId(2).effectiveEnabled).toBe(false);
+    expect(byId(3).enabled).toBe(true);
+    expect(byId(3).effectiveEnabled).toBe(false);
+  });
+
+  it("1.13 effectiveEnabled: Negative 側でも Positive 側と独立して判定されること", () => {
+    // Arrange
+    const positive = [grp(1, "PosOff", [grp(2, "PosChild", [leaf(3)])], false)];
+    const negative = [grp(4, "NegOn", [grp(5, "NegChild", [leaf(6)])])];
+
+    // Act
+    const groups = groupsOf(buildGroupMap(positive, negative));
+    const byId = (id: number) => groups.find((g) => g.id === id)!;
+
+    // Assert
+    expect(byId(2).effectiveEnabled).toBe(false);
+    expect(byId(5).effectiveEnabled).toBe(true);
+  });
 });
