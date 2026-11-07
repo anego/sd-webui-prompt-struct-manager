@@ -66,6 +66,16 @@ Centralized drag & drop (SortableJS / vuedraggable) options.
 - **`pull: "clone"`**: Keeps the item in its source list while dragging to another list. Otherwise the source collapses, shifting the layout so the drop target escapes the cursor. Removal from the source is performed by `finalizeCrossListMove()` after the drop is committed.
 - Drop-accuracy settings (`fallbackOnBody` / `emptyInsertThreshold` / `swapThreshold` / `invertSwap` / `scroll`) are also managed here.
 
+### `src/itemId.ts`
+Issues item IDs and repairs them on load.
+- Profiles, lock checks, focus, the view filter, `:key` and the `node-<ID>` element IDs all assume that **IDs are unique within a file**.
+- **Always issue new IDs with `createItemId()`.** It is based on the current time and always returns a value larger than the previous one, so IDs stay unique even when many are issued within the same millisecond. Do not build IDs yourself from `Date.now()` or random numbers (group duplication and PNG Info import used to produce duplicate IDs that way).
+- `repairItemIds()` is a pure function that gives new IDs to the second and later duplicates and to missing IDs, and moves profile states to the new IDs. `loadPrompts` in `store.ts` calls it after converting another tool's format (`src/foreignFormat.ts`), and saves right away when anything was repaired.
+
+### `src/webUiRoot.ts`
+Returns the root to search WebUI (Gradio) elements from.
+- When `gradio-app` has a shadowRoot, both the WebUI elements and the PSM elements live inside it, and `document.getElementById` cannot find them. Use `getWebUiRoot()` / `findNodeElement()` to look up WebUI or tree elements.
+
 ### `scripts/psm/translate.py`
 Translation backend with provider abstraction.
 - `PROVIDERS` registers `openai` (OpenAI-compatible API) and `deepl`. To add a provider, implement `_translate_<name>()` and register it.
@@ -90,9 +100,12 @@ PNG Info import, quick move-to, drag & drop move finalization, and adding/editin
   - `tests/store_prompt.spec.ts` — store logic in general
   - `tests/groupMapUtils.spec.ts` — group map aggregation
   - `tests/generationFields.spec.ts` — reading/applying generation setting fields
-  - `tests/viewFilter.spec.ts` — view filter (computing enabled prompts and the groups containing them)
+  - `tests/viewFilter.spec.ts` — view filter (computing enabled prompts and the groups containing them) and the shown items that keyboard navigation visits
   - `tests/inputValue.spec.ts` — converting search field values (handling the `null` set by the clear button)
-- **Total Tests:** 264
+  - `tests/itemId.spec.ts` — issuing item IDs and repairing duplicate or missing IDs on load
+  - `tests/foreignFormat.spec.ts` — converting files written in another tool's format
+  - `tests/webUiRoot.spec.ts` — the root for finding WebUI elements (with and without a shadowRoot)
+- **Total Tests:** 317
 - **Command:**
   ```bash
   bun run test:unit

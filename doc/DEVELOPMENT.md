@@ -66,6 +66,16 @@ MDIアイコン (`@mdi/font`) の表示崩れを防ぐための重要スクリ�
 - **`pull: "clone"`**: 他リストへのドラッグ中に移動元から要素が抜けないようにする。抜けるとレイアウトが詰まり、ドロップ先がカーソルから逃げるため。移動元からの削除は `finalizeCrossListMove()` がドロップ確定後に行う。
 - ドロップ精度に関わる設定（`fallbackOnBody` / `emptyInsertThreshold` / `swapThreshold` / `invertSwap` / `scroll`）もここで一元管理する。
 
+### `src/itemId.ts`
+アイテムIDの発行と、読み込み時の修復を行うモジュール。
+- プロファイル・ロック判定・フォーカス・表示フィルター・`:key`・`node-<ID>` の要素IDなどは、**ファイル内でIDが一意であること**を前提にしている。
+- **新しいIDは必ず `createItemId()` で発行すること。** 現在時刻を基準に、常に前回より大きい値を返すため、同じミリ秒内に大量に発行しても重複しない。`Date.now()` や乱数で独自に採番しないこと（以前はグループの複製や PNG Info の取り込みでIDが重複していた）。
+- `repairItemIds()` は副作用のない関数で、重複した2つ目以降と欠損したIDに新しいIDを振り、プロファイルの状態を新しいIDへ引き継ぐ。`store.ts` の `loadPrompts` が、別のツールの形式の変換（`src/foreignFormat.ts`）のあとに呼び、修復した場合はすぐに保存する。
+
+### `src/webUiRoot.ts`
+WebUI (Gradio) の画面要素を探す起点を返すモジュール。
+- `gradio-app` が shadowRoot を持つ環境では、WebUI の要素も PSM の要素もその中にあり、`document.getElementById` では見つからない。WebUI やツリーの要素を探すときは、`getWebUiRoot()` / `findNodeElement()` を使うこと。
+
 ### `scripts/psm/translate.py`
 翻訳バックエンドのプロバイダ抽象化モジュール。
 - `PROVIDERS` に `openai`（OpenAI互換API）と `deepl` を登録。新規プロバイダは `_translate_<name>()` を実装して登録するだけで追加できる。
@@ -90,9 +100,12 @@ MDIアイコン (`@mdi/font`) の表示崩れを防ぐための重要スクリ�
   - `tests/store_prompt.spec.ts` — ストアロジック全般
   - `tests/groupMapUtils.spec.ts` — グループマップ集計
   - `tests/generationFields.spec.ts` — 生成設定フィールドの読み書き
-  - `tests/viewFilter.spec.ts` — 表示フィルター（有効なプロンプトとそれを含むグループの計算）
+  - `tests/viewFilter.spec.ts` — 表示フィルター（有効なプロンプトとそれを含むグループの計算）と、キーボードでたどる表示中の項目の計算
   - `tests/inputValue.spec.ts` — 検索欄の値の変換（クリアボタンで入る `null` の扱い）
-- **テスト件数:** 264件
+  - `tests/itemId.spec.ts` — アイテムIDの発行と、読み込み時の重複・欠損したIDの修復
+  - `tests/foreignFormat.spec.ts` — 別のツールの形式のファイルの変換
+  - `tests/webUiRoot.spec.ts` — WebUI の画面要素を探す起点（shadowRoot の有無）
+- **テスト件数:** 317件
 - **実行コマンド:**
   ```bash
   bun run test:unit

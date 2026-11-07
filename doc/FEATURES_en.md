@@ -34,6 +34,7 @@
 - **Feature Overview:** A toggle switch (teal blue) is placed on the right side of group headers.
 - **Exclusive Logic:** When active, enabling (checking) one prompt inside the group automatically disables (unchecks) all other sibling prompts.
 - **Auto-Cleanup:** If you activate the single-choice mode on a group that already has multiple enabled items, it automatically disables all but the first enabled item.
+- **When the parent group is disabled:** Exclusive mode decides how the items inside are enabled, so it can be toggled even for a group whose parent group is disabled (not while locked).
 - **Dynamic Prompts Syntax:** Supports `{A|B|C}` syntax to select one prompt randomly from the group.
 - **Toggle Switch:** Easily toggle ON/OFF via the "Randomize Group" switch next to the group name.
 - **Visibility:** The group is highlighted with a purple dashed border when in Random Mode.
@@ -65,13 +66,13 @@
 
 ### 1.7 Duplicate Detection
 - **Auto Detection:** Automatically detects and highlights duplicate prompts that have the exact same text within the tree.
-  - Surrounding whitespace and a trailing comma are ignored when comparing (they are removed on output, so `on stomach` and `on stomach,` are detected as duplicates).
+  - Surrounding whitespace and a trailing comma are ignored when comparing (they are removed on output, so `on stomach` and `on stomach,` are detected as duplicates). The same applies when several commas trail, as in `on stomach,,`.
   - Duplicate prompts get an outer border and glow in the highlight color (warning color / error color) in addition to the chip color.
   - Every group containing a duplicate prompt (including all ancestor groups) also gets a thick border in the same highlight color as the prompt (warning color / error color). Even if the duplicate is inside a collapsed group or deep in nested groups, you can find it by following the highlighted borders.
 - **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
 - **Listing and resolving duplicates:** The warning/error dialog shown on apply lists the number of duplicated contents and the location of each occurrence (`Positive > Group > … > Prompt name`). Random groups get a dice icon (only one item is picked per generation, so they may not actually duplicate).
   - **Disable:** Disables the prompt on the spot, and the list and the highlights in the tree update right away. Locked prompts cannot be disabled and get a lock icon.
-  - **Show Location:** Closes the dialog, opens the ancestor groups and the pane, then scrolls to and focuses the prompt. If the pane's search field is hiding it, the search is cleared.
+  - **Show Location:** Closes the dialog, opens the ancestor groups and the pane, then scrolls to and focuses the prompt. If the pane's search field is hiding it, the search is cleared. When used while the search field or the view filter is narrowing the tree, the groups opened to show it stay open after the narrowing ends.
   - Once all duplicates are resolved, you can apply even in `Error` mode.
 - **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks. This also applies with a trailing comma, such as `BREAK,`.
 - **Hidden Groups Exclusion:** Prompts in hidden groups (including nested groups inside them) are excluded from duplicate checks.
@@ -106,7 +107,7 @@
   - **Enabled (with Groups):** Shows only the added prompts and the borders of the groups containing them, and opens those groups automatically.
 - **What counts as enabled:** A prompt that is enabled itself but sits in a disabled group is not added to the prompt, so it is not shown. Added prompts inside hidden groups are shown even while "Show Hidden Groups" is OFF.
 - **Combined with search:** Together with a pane's search field, only items that match both are shown.
-- **Editing:** Toggling, changing weights, editing and deleting work as usual. A prompt you disable disappears from the view right away. Up/down keyboard navigation visits only the items shown.
+- **Editing:** Toggling, changing weights, editing and deleting work as usual. A prompt you disable disappears from the view right away. Up/down keyboard navigation visits only the items shown (when the search field is filtering, only those that also match the search).
 - **Restoring open/closed state:** Groups auto-expanded by the filter return to their previous open/closed state when you switch back to "All".
 - **Not saved:** The filter choice is not saved and goes back to "All" when the WebUI is reloaded.
 - **While switching:** Redrawing the tree can take a while with many prompts, so a "Switching the view..." loading indicator is shown during the switch and input is blocked.
@@ -123,7 +124,9 @@
 ### 2.2 shortcuts
 - **Global Toggle:** Customizable via settings (Default: None). Toggles PSM panel visibility.
 - **Apply & Close:** `Ctrl + Shift + Enter` applies the current prompt to WebUI and closes the panel.
-- **Keyboard Navigation:** Move items with arrow keys, Edit with Enter, Toggle Enable/Disable with Space.
+- **Keyboard Navigation:** Move items with arrow keys, Edit with F2, Toggle Enable/Disable with Space.
+  - Up/down navigation visits only the items shown on screen (it follows the pane's search field, the view filter and the "Show Hidden Groups" setting, and skips collapsed panes and the contents of collapsed groups).
+  - Keys are ignored while the loading overlay is shown.
 
 ### 2.3 Theme and Style
 - **Dark Mode:** Adopts a design that blends well with the WebUI dark theme.
@@ -167,6 +170,9 @@
 - **Multi-file Management:** Create multiple files (.yaml / .json can coexist) for different purposes and switch between them via a dropdown.
 - **File Operations:** Create New, Duplicate, Rename, Delete. When duplicating or renaming without specifying an extension, the source file's format (.yaml or .json) is automatically carried over.
 - **YAML→JSON Conversion:** The "Convert to JSON" button in the sidebar (enabled only when a .yaml file is selected) converts an existing YAML file into a JSON file with the same content. The original YAML file is left untouched, so it also serves as a backup.
+- **Item IDs:** Each item gets an ID that is unique within the file. Profiles, locks, focus and the view filter identify items by ID, so each new ID is always larger than the previous one and stays unique even when many are issued within the same millisecond (duplicating a group, PNG Info import, etc.).
+- **Automatic repair on load:** When a file with duplicate or missing IDs is opened (a file made with an older version or edited outside PSM), the second and later duplicates and the items without an ID get new IDs, profile states move to the new IDs, and the file is saved right away. A notice shows how many items were repaired (only once, when the repair happens; the counts are also logged to the console). Unique string IDs are kept as they are. The repair cannot be undone.
+- **Converting another tool's format:** A file written with `group` / `items` / `prompt` keys from another tool is converted to the PSM format (`name` / `children` / `content`) when opened, then saved, and a notice shows how many nodes were converted. Prompts written as arrays are joined into one comma-separated prompt, and `star`, which has no PSM equivalent, is not carried over.
 - **Faster Saving (write cache):** Instead of reading and rewriting the entire file on every save, changes are applied instantly to an in-memory cache on the server, and the actual disk write is batched roughly 1.5 seconds after activity settles. This keeps checkbox toggles and slider drags responsive even for large files. Any pending write is flushed to disk before the browser tab closes or reloads.
 
 ### 3.2 PNG Info (infotext) Import
@@ -207,7 +213,7 @@
 ### 3.5 Asynchronous Loading Indicator
 - **Loading Overlay:** Displays a full-screen, pointer-blocking loading overlay (`v-overlay`) during initial YAML loading, file list retrieval, and file operations (creating, duplicating, renaming, and deleting files).
 - **No-Lock on Auto-Save:** Does not display the loading spinner during auto-saving (`savePrompts`) triggered by prompt toggles or weight slider adjustments, preventing user interactions from being locked.
-- **Operation Interlock:** Blocks all mouse and keyboard interactions during loading to prevent data corruption and race conditions caused by double clicks or concurrent updates.
+- **Operation Interlock:** Blocks all mouse and keyboard interactions (including keyboard navigation and toggling in the tree) during loading to prevent data corruption and race conditions caused by double clicks or concurrent updates.
 - **Reactive Progress Text:** Displays a central spinner (`v-progress-circular`) alongside localized messages such as "Loading..." or "Saving..." depending on the active operation.
 
 ## 4. Anima Model Support & Translation
