@@ -90,7 +90,9 @@ PNG Info import, quick move-to, drag & drop move finalization, and adding/editin
   - `tests/store_prompt.spec.ts` — store logic in general
   - `tests/groupMapUtils.spec.ts` — group map aggregation
   - `tests/generationFields.spec.ts` — reading/applying generation setting fields
-- **Total Tests:** 238
+  - `tests/viewFilter.spec.ts` — view filter (computing enabled prompts and the groups containing them)
+  - `tests/inputValue.spec.ts` — converting search field values (handling the `null` set by the clear button)
+- **Total Tests:** 264
 - **Command:**
   ```bash
   bun run test:unit

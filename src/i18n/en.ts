@@ -117,6 +117,20 @@ export const en = {
   duplicateWarnMessage: "Duplicate prompts found.\nApply anyway?",
   duplicateErrorTitle: "Duplicate Prompt Error",
   duplicateErrorMessage: "Cannot apply due to duplicate prompts.\nPlease fix duplicates first.",
+  duplicateCount: "{count}",
+  duplicateResolved: "All duplicates have been resolved.\nYou can apply now.",
+  duplicateDisableThis: "Disable",
+  duplicateShowLocation: "Show Location",
+  duplicateApplyAnyway: "Apply Anyway",
+  duplicateLockedHint: "Locked, so it cannot be disabled",
+
+  // View filter
+  viewFilterHint: "Tree view filter (shared by Positive / Negative)",
+  viewFilterAll: "All",
+  viewFilterEnabled: "Enabled Only",
+  viewFilterEnabledWithGroups: "Enabled (with Groups)",
+  viewFilterEmpty: "No items to display",
+  viewFilterApplying: "Switching the view...",
   
   // File Dialogs
   createNewFile: "Create New File",

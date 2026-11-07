@@ -23,6 +23,8 @@ import {
   deleteProfile,
   applyGenerationProfile,
   deleteGenerationProfile,
+  switchViewFilterMode,
+  isViewFilterMode,
 } from "./store";
 import { PsmItem } from "./types";
 import { GENERATION_FIELDS } from "./generationFields";
@@ -629,6 +631,24 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
             </v-btn>
           </div>
 
+          <!-- 表示フィルター (両ペイン共通) -->
+          <div class="psm-app-root__view-filter d-flex align-center ml-2" :title="t('viewFilterHint')">
+            <v-icon size="small" color="grey" class="mr-1">mdi-filter-variant</v-icon>
+            <v-radio-group
+              :model-value="state.viewFilterPending ?? state.viewFilterMode"
+              inline
+              density="compact"
+              hide-details
+              color="primary"
+              data-testid="view-filter-mode"
+              @update:model-value="(val) => isViewFilterMode(val) && switchViewFilterMode(val)"
+            >
+              <v-radio :label="t('viewFilterAll')" value="all"></v-radio>
+              <v-radio :label="t('viewFilterEnabled')" value="enabled"></v-radio>
+              <v-radio :label="t('viewFilterEnabledWithGroups')" value="enabledWithGroups"></v-radio>
+            </v-radio-group>
+          </div>
+
           <v-spacer></v-spacer>
           <div class="d-flex align-center ga-2 mr-2">
             <v-btn
@@ -907,6 +927,16 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
     background: transparent;
     width: 100%;
     height: 100%;
+  }
+
+  /* 表示フィルターのラジオボタン: 混み合ったツールバーに収まるよう、文字を小さくして折り返さない */
+  &__view-filter {
+    flex-shrink: 0;
+
+    :deep(.v-label) {
+      font-size: $font-size-sm;
+      white-space: nowrap;
+    }
   }
 }
 </style>

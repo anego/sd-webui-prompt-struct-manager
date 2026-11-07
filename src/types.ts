@@ -114,6 +114,37 @@ export interface PsmProfile {
  */
 export type DuplicateCheckMode = "none" | "warn" | "error";
 
+/** 重複プロンプトの1か所を含む、ルートから親までのグループ (重複の一覧ダイアログで場所を示すために使う) */
+export interface DuplicatePathGroup {
+  id: number;
+  name: string;
+  isRandom: boolean;
+}
+
+/** 重複しているプロンプトの1か所 */
+export interface DuplicateOccurrence {
+  item: PsmItem;
+  pane: "positive" | "negative";
+  /** ルートから親までのグループ (外側から順。ルート直下のプロンプトは空) */
+  groups: DuplicatePathGroup[];
+  /** 自身または祖先グループがロック中のため、無効にできない */
+  locked: boolean;
+}
+
+/** 同じ内容で重複しているプロンプトのまとまり (text は前後の空白と末尾のカンマを除いた内容) */
+export interface DuplicateGroup {
+  text: string;
+  occurrences: DuplicateOccurrence[];
+}
+
+/**
+ * ツリーの表示フィルター (ツールバーで両ペイン共通に切り替える。保存はせず、読み込み時は "all")
+ * - "all": 無効なプロンプトも含めてすべて表示する
+ * - "enabled": 実際に反映される (自身と祖先がすべて有効な) プロンプトだけを、グループの枠なしで並べる
+ * - "enabledWithGroups": 実際に反映されるプロンプトを、それを含むグループの枠の中に表示する
+ */
+export type ViewFilterMode = "all" | "enabled" | "enabledWithGroups";
+
 /**
  * 親グループが無効な項目を有効にしようとしたときの挙動 (localStorage "psm_settings" に保存)
  * - "none": 何もしない (反映されない理由だけを通知する)

@@ -3904,3 +3904,401 @@ describe("親グループが無効な項目の有効化", () => {
     });
   });
 });
+
+// -------------------------------------------------------------------------
+// 23. 重複の一覧ダイアログ・場所の表示・表示フィルター
+// -------------------------------------------------------------------------
+// 反映前の重複の警告ダイアログに、重複しているプロンプトを場所付きで一覧し、
+// その場で無効にしたり、ツリー上の場所を表示したりできるようにした。
+// あわせて、ツールバーの表示フィルター (すべて / 有効のみ / 有効(グループ付き)) を追加した。
+import {
+  collectDuplicateOccurrences,
+  refreshDuplicateHighlight,
+  disableDuplicateOccurrence,
+  revealItem,
+  setViewFilterMode,
+  isViewFilterMode,
+  switchViewFilterMode,
+} from "../src/store";
+
+describe("重複の一覧ダイアログ・場所の表示・表示フィルター", () => {
+  const leaf = (id: number, content: string, enabled = true): PsmItem => ({
+    id, name: `n${id}`, content, enabled, weight: 1.0, is_group: false,
+  });
+  const grp = (
+    id: number,
+    children: PsmItem[],
+    options: { enabled?: boolean; isRandom?: boolean; isLocked?: boolean; isHidden?: boolean; isOpen?: boolean } = {},
+  ): PsmItem => ({
+    id,
+    name: `g${id}`,
+    content: "",
+    enabled: options.enabled ?? true,
+    weight: 1.0,
+    is_group: true,
+    isOpen: options.isOpen ?? true,
+    isRandom: options.isRandom,
+    isLocked: options.isLocked,
+    isHidden: options.isHidden,
+    children,
+  });
+  const nodeOf = (id: number): PsmItem => {
+    const path = findNodePath(id);
+    if (!path) throw new Error(`テスト用ツリーに ID ${id} のノードがありません`);
+    return path[path.length - 1].node;
+  };
+  const saveCalls = () => fetchMock.mock.calls.filter((c) => c[0] === "/psm/save-prompts");
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: "success" }) } as Response);
+    state.selectedFile = "duplicate.json";
+    state.duplicateHighlightLevel = null;
+    state.posOpen = false;
+    state.negOpen = false;
+    state.focusedItemId = null;
+    state.revealRequest = null;
+    state.viewFilterMode = "all";
+  });
+
+  afterEach(() => {
+    state.viewFilterMode = "all";
+    state.duplicateHighlightLevel = null;
+    state.revealRequest = null;
+    state.focusedItemId = null;
+  });
+
+  it("23.1 collectDuplicateOccurrences: 重複を内容ごとに、最初に出現した順で、ペインとグループの場所付きで集めること", () => {
+    // Arrange
+    state.positive = [
+      grp(1, [grp(2, [leaf(3, "on stomach")], { isRandom: true })]),
+      leaf(4, "smile"),
+      grp(5, [leaf(6, "on stomach,")]),
+    ];
+    state.negative = [leaf(7, "smile")];
+
+    // Act
+    const groups = collectDuplicateOccurrences();
+
+    // Assert
+    expect(groups.map((g) => g.text)).toEqual(["on stomach", "smile"]);
+    const [stomach, smile] = groups;
+    expect(stomach.occurrences.map((o) => [o.item.id, o.pane])).toEqual([[3, "positive"], [6, "positive"]]);
+    expect(stomach.occurrences[0].groups).toEqual([
+      { id: 1, name: "g1", isRandom: false },
+      { id: 2, name: "g2", isRandom: true },
+    ]);
+    expect(smile.occurrences.map((o) => [o.item.id, o.pane, o.groups.length])).toEqual([[4, "positive", 0], [7, "negative", 0]]);
+  });
+
+  it("23.2 collectDuplicateOccurrences: 祖先のロックを記録し、無効・非表示グループ配下は数えず、detectDuplicates と同じ結果になること", () => {
+    // Arrange
+    state.positive = [
+      grp(1, [grp(2, [leaf(3, "1girl")])], { isLocked: true }),
+      leaf(4, "1girl"),
+      grp(5, [leaf(6, "1girl")], { enabled: false }),
+      grp(7, [leaf(8, "1girl")], { isHidden: true }),
+      leaf(9, "1girl", false),
+    ];
+    state.negative = [];
+
+    // Act
+    const groups = collectDuplicateOccurrences();
+    const texts = detectDuplicates();
+
+    // Assert
+    expect(groups).toHaveLength(1);
+    expect(groups[0].occurrences.map((o) => [o.item.id, o.locked])).toEqual([[3, true], [4, false]]);
+    expect([...texts]).toEqual(["1girl"]);
+  });
+
+  it("23.3 disableDuplicateOccurrence: 1か所を無効にして保存し、重複がすべて解消されたら強調表示を消すこと", async () => {
+    // Arrange
+    state.positive = [leaf(1, "smile"), grp(2, [leaf(3, "smile")])];
+    state.negative = [];
+    state.duplicateTexts = new Set(["smile"]);
+    state.duplicateHighlightLevel = "error";
+
+    // Act
+    await disableDuplicateOccurrence(nodeOf(3));
+    await flush();
+
+    // Assert
+    expect(nodeOf(3).enabled).toBe(false);
+    expect(saveCalls().length).toBeGreaterThan(0);
+    expect(collectDuplicateOccurrences()).toEqual([]);
+    expect(state.duplicateHighlightLevel).toBeNull();
+    expect(state.duplicateTexts.size).toBe(0);
+  });
+
+  it("23.4 disableDuplicateOccurrence: ほかの重複が残っている場合は、強調表示を残っている重複だけに更新すること", async () => {
+    // Arrange
+    state.positive = [leaf(1, "smile"), leaf(2, "smile"), leaf(3, "1girl"), leaf(4, "1girl")];
+    state.negative = [];
+    state.duplicateTexts = new Set(["smile", "1girl"]);
+    state.duplicateHighlightLevel = "warn";
+
+    // Act
+    await disableDuplicateOccurrence(nodeOf(2));
+
+    // Assert
+    expect([...state.duplicateTexts]).toEqual(["1girl"]);
+    expect(state.duplicateHighlightLevel).toBe("warn");
+  });
+
+  it("23.5 disableDuplicateOccurrence: ロック中のプロンプトは無効にせず、保存もしないこと", async () => {
+    // Arrange
+    state.positive = [grp(1, [leaf(2, "smile")], { isLocked: true }), leaf(3, "smile")];
+    state.negative = [];
+
+    // Act
+    await disableDuplicateOccurrence(nodeOf(2));
+    await flush();
+
+    // Assert
+    expect(nodeOf(2).enabled).toBe(true);
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it("23.6 refreshDuplicateHighlight: 強調表示中でなければ何もしないこと", () => {
+    // Arrange
+    state.positive = [leaf(1, "smile"), leaf(2, "smile")];
+    state.negative = [];
+    state.duplicateTexts = new Set();
+    state.duplicateHighlightLevel = null;
+
+    // Act
+    refreshDuplicateHighlight();
+
+    // Assert
+    expect(state.duplicateTexts.size).toBe(0);
+    expect(state.duplicateHighlightLevel).toBeNull();
+  });
+
+  it("23.7 revealItem: 祖先グループとアイテムを含むペインを開き、フォーカスを当て、要求ごとに別の表示要求を出すこと", () => {
+    // Arrange
+    state.positive = [leaf(1, "smile")];
+    state.negative = [grp(10, [grp(11, [leaf(12, "lowres")], { isOpen: false })], { isOpen: false })];
+
+    // Act
+    const first = revealItem(12);
+    const firstRequest = state.revealRequest;
+    const second = revealItem(12);
+
+    // Assert
+    expect(first).toBe(true);
+    expect(second).toBe(true);
+    expect(nodeOf(10).isOpen).toBe(true);
+    expect(nodeOf(11).isOpen).toBe(true);
+    expect(state.negOpen).toBe(true);
+    expect(state.posOpen).toBe(false);
+    expect(state.focusedItemId).toBe(12);
+    expect(state.revealRequest).toEqual({ itemId: 12 });
+    expect(state.revealRequest).not.toBe(firstRequest);
+  });
+
+  it("23.8 revealItem: ツリーに無いIDでは何も変更せず false を返すこと", () => {
+    // Arrange
+    state.positive = [leaf(1, "smile")];
+    state.negative = [];
+
+    // Act
+    const result = revealItem(999);
+
+    // Assert
+    expect(result).toBe(false);
+    expect(state.focusedItemId).toBeNull();
+    expect(state.revealRequest).toBeNull();
+    expect(state.posOpen).toBe(false);
+  });
+
+  it("23.9 setViewFilterMode: 表示フィルターを切り替え、ローカル設定には保存しないこと", () => {
+    // Arrange
+    const validValues = ["all", "enabled", "enabledWithGroups"].map(isViewFilterMode);
+
+    // Act
+    setViewFilterMode("enabledWithGroups");
+
+    // Assert
+    expect(validValues).toEqual([true, true, true]);
+    expect(isViewFilterMode("duplicates")).toBe(false);
+    expect(isViewFilterMode(1)).toBe(false);
+    expect(state.viewFilterMode).toBe("enabledWithGroups");
+    expect(mockLocalStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  describe("switchViewFilterMode - ローディング表示を出してからの切り替え", () => {
+    type FrameCallback = (time: number) => void;
+    /** requestAnimationFrame に渡されたコールバック (テストから任意のタイミングで呼び出す) */
+    let frameCallbacks: FrameCallback[] = [];
+    /** 予約済みのフレームのコールバックを実行し、その中で予約された setTimeout も実行させる */
+    const runFrame = async () => {
+      const callbacks = frameCallbacks;
+      frameCallbacks = [];
+      callbacks.forEach((cb) => cb(0));
+      await flush();
+    };
+
+    beforeEach(() => {
+      frameCallbacks = [];
+      stubGlobal("requestAnimationFrame", (cb: FrameCallback) => {
+        frameCallbacks.push(cb);
+        return frameCallbacks.length;
+      });
+      state.viewFilterPending = null;
+      state.loadingCount = 0;
+      state.isLoading = false;
+      state.loadingText = "";
+    });
+
+    afterEach(() => {
+      state.viewFilterPending = null;
+      state.loadingCount = 0;
+      state.isLoading = false;
+      state.loadingText = "";
+    });
+
+    it("23.12 ローディング表示が描画されるまではツリーを切り替えず、選んだ値だけを先にラジオボタンへ反映すること", async () => {
+      // Arrange
+      const switching = switchViewFilterMode("enabled");
+
+      // Act
+      await flush();
+
+      // Assert
+      expect(state.isLoading).toBe(true);
+      expect(state.loadingText).toBe("viewFilterApplying");
+      expect(state.viewFilterPending).toBe("enabled");
+      expect(state.viewFilterMode).toBe("all");
+
+      // 後片付け (次のテストへ持ち越さないよう、切り替えを最後まで進める)
+      await runFrame();
+      await runFrame();
+      await switching;
+    });
+
+    it("23.13 描画後にツリーを切り替え、切り替え後の描画を待ってからローディング表示を消すこと", async () => {
+      // Arrange
+      const switching = switchViewFilterMode("enabledWithGroups");
+      await flush();
+
+      // Act
+      await runFrame();
+      const afterFirstFrame = { mode: state.viewFilterMode, isLoading: state.isLoading };
+      await runFrame();
+      await switching;
+
+      // Assert
+      expect(afterFirstFrame).toEqual({ mode: "enabledWithGroups", isLoading: true });
+      expect(state.viewFilterMode).toBe("enabledWithGroups");
+      expect(state.isLoading).toBe(false);
+      expect(state.loadingCount).toBe(0);
+      expect(state.viewFilterPending).toBeNull();
+    });
+
+    it("23.14 描画を待つ間に別のモードが選ばれた場合は、最後に選んだモードだけを適用すること", async () => {
+      // Arrange
+      const first = switchViewFilterMode("enabled");
+      const second = switchViewFilterMode("enabledWithGroups");
+      await flush();
+      const pendingWhileWaiting = state.viewFilterPending;
+
+      // Act
+      await runFrame();
+      await runFrame();
+      await Promise.all([first, second]);
+
+      // Assert
+      expect(pendingWhileWaiting).toBe("enabledWithGroups");
+      expect(state.viewFilterMode).toBe("enabledWithGroups");
+      expect(state.isLoading).toBe(false);
+      expect(state.loadingCount).toBe(0);
+      expect(state.viewFilterPending).toBeNull();
+    });
+
+    it("23.15 選択中と同じモードでは、ローディング表示を出さないこと", async () => {
+      // Arrange
+      state.viewFilterMode = "enabled";
+
+      // Act
+      await switchViewFilterMode("enabled");
+
+      // Assert
+      expect(state.isLoading).toBe(false);
+      expect(state.loadingCount).toBe(0);
+      expect(frameCallbacks).toEqual([]);
+    });
+
+    it("23.16 requestAnimationFrame が呼ばれない (非表示のタブなど) 場合も、一定時間で切り替えてローディング表示を消すこと", async () => {
+      // Arrange
+      const switching = switchViewFilterMode("enabled");
+
+      // Act
+      await switching;
+
+      // Assert
+      expect(state.viewFilterMode).toBe("enabled");
+      expect(state.isLoading).toBe(false);
+      expect(state.loadingCount).toBe(0);
+    });
+  });
+
+  describe("キーボード (矢印キー) での移動", () => {
+    const pressArrowDown = () => {
+      const { handleGlobalKeydown } = useKeyboardNav();
+      const event = {
+        key: "ArrowDown",
+        isComposing: false,
+        target: { tagName: "DIV", classList: { contains: () => false } },
+        preventDefault: vi.fn(),
+      };
+      handleGlobalKeydown(event as unknown as KeyboardEvent);
+    };
+    /** 先頭から n 回 ArrowDown を押したときに、フォーカスが当たったIDを順に返す */
+    const walkFocus = (times: number): (number | null)[] =>
+      Array.from({ length: times }, () => {
+        pressArrowDown();
+        return state.focusedItemId;
+      });
+
+    beforeEach(() => {
+      state.isVisible = true;
+      state.isEditing = false;
+      state.isDeleting = false;
+      state.disableAllConfirm = null;
+      state.posOpen = true;
+      state.positive = [
+        grp(1, [leaf(2, "walk"), leaf(3, "run", false), grp(4, [leaf(5, "sit", false)])]),
+        grp(6, [leaf(7, "jump")], { enabled: false }),
+        leaf(8, "1girl"),
+      ];
+      state.negative = [];
+    });
+
+    afterEach(() => {
+      state.isVisible = false;
+    });
+
+    it("23.10 「有効のみ」では、反映される有効なプロンプトだけを順にたどること", () => {
+      // Arrange
+      setViewFilterMode("enabled");
+
+      // Act
+      const focused = walkFocus(3);
+
+      // Assert
+      expect(focused).toEqual([2, 8, 8]);
+    });
+
+    it("23.11 「有効(グループ付き)」では、有効なプロンプトとそれを含むグループだけをたどること", () => {
+      // Arrange
+      setViewFilterMode("enabledWithGroups");
+
+      // Act
+      const focused = walkFocus(4);
+
+      // Assert
+      expect(focused).toEqual([1, 2, 8, 8]);
+    });
+  });
+});

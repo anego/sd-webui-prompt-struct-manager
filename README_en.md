@@ -16,7 +16,8 @@ This project has been tested with "Stable Diffusion WebUI reForge".
 *   **Exclusive Group Selection (Single-Choice Mode)**: Toggleable via the switch on the group header (teal blue). When active, enabling one item automatically disables all other sibling items in that group.
 *   **Profiles (State Snapshot)**: Save the current tree state (enable/disable, weight values) as a named profile. You can apply or delete these snapshot states instantly from the toolbar.
 *   **Random Group**: Supports Dynamic Prompts `{A|B|C}` syntax to randomly select a prompt from within the group.
-*   **Duplicate Detection**: Automatically detects duplicate prompts in the tree, highlights them, and can block generation based on settings.
+*   **Duplicate Detection**: Automatically detects duplicate prompts in the tree, highlights them, and can block generation based on settings. The dialog shown on apply lists where each duplicate is, and lets you disable it on the spot or jump to it in the tree.
+*   **View Filter**: Radio buttons in the toolbar switch the tree between "All", "Enabled Only" and "Enabled (with Groups)", so you can check only the prompts that are actually added.
 *   **Group Map**: Displays a tree structure navigation on the right side, allowing instant jumping to target groups with a click.
 *   **Tag Autocomplete Integration**: If `a1111-sd-webui-tagcomplete` is installed, tag suggestions are available during input.
 *   **Apply Preview**: Before applying, review the full compiled output and a tag-level diff (added/removed) against the current WebUI prompt, including an approximate token count.

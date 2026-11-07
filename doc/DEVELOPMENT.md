@@ -90,7 +90,9 @@ MDIアイコン (`@mdi/font`) の表示崩れを防ぐための重要スクリ�
   - `tests/store_prompt.spec.ts` — ストアロジック全般
   - `tests/groupMapUtils.spec.ts` — グループマップ集計
   - `tests/generationFields.spec.ts` — 生成設定フィールドの読み書き
-- **テスト件数:** 238件
+  - `tests/viewFilter.spec.ts` — 表示フィルター（有効なプロンプトとそれを含むグループの計算）
+  - `tests/inputValue.spec.ts` — 検索欄の値の変換（クリアボタンで入る `null` の扱い）
+- **テスト件数:** 264件
 - **実行コマンド:**
   ```bash
   bun run test:unit

@@ -22,14 +22,28 @@ import {
   snapshotGroupOpenState,
   restoreGroupOpenState,
   requestDisableAll,
+  findParentAndItem,
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
+import { buildEnabledView, matchesQuery } from "../viewFilter";
+import { toInputText } from "../inputValue";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
 
 const searchQuery = ref("");
 provide("search-query", searchQuery);
+
+/**
+ * 検索欄の v-model 用
+ * クリアボタンで null が入ると、表示フィルターの計算などで toLowerCase が失敗するため、空文字列に変換して保持する。
+ */
+const searchInput = computed({
+  get: () => searchQuery.value,
+  set: (value: string | null) => {
+    searchQuery.value = toInputText(value);
+  },
+});
 
 const props = defineProps<{
   /** ペインタイトル (例: Positive) */
@@ -45,18 +59,48 @@ const props = defineProps<{
 }>();
 
 /**
- * フィルター機能でグループが自動展開された際、解除後に元の開閉状態へ戻すためのスナップショット
- * フィルター開始(空→非空)時に保存し、解除(非空→空)時に復元する
+ * 表示フィルター (有効のみ / 有効(グループ付き)) で表示する項目
+ * 検索欄の絞り込みも含めて計算する。フィルターが「すべて」の間は null。
+ */
+const filterView = computed(() => {
+  if (state.viewFilterMode === "all") return null;
+  return buildEnabledView(props.items, searchQuery.value);
+});
+provide("filter-view", filterView);
+
+/** 「有効のみ」ではグループの枠を出さず、プロンプトだけを並べる */
+const isFlatView = computed(() => state.viewFilterMode === "enabled");
+
+/** 検索か表示フィルターのどちらかで絞り込み中か */
+const isFiltering = computed(() => !!searchQuery.value || state.viewFilterMode !== "all");
+
+/**
+ * 検索・表示フィルターでグループが自動展開された際、解除後に元の開閉状態へ戻すためのスナップショット
+ * 絞り込みの開始時に保存し、検索とフィルターの両方を解除した時に復元する
  */
 let groupOpenSnapshot: Map<number, boolean> | null = null;
-watch(searchQuery, (newVal, oldVal) => {
-  if (newVal && !oldVal) {
+watch(isFiltering, (filtering, wasFiltering) => {
+  if (filtering && !wasFiltering) {
     groupOpenSnapshot = snapshotGroupOpenState(props.items);
-  } else if (!newVal && oldVal && groupOpenSnapshot) {
+  } else if (!filtering && wasFiltering && groupOpenSnapshot) {
     restoreGroupOpenState(props.items, groupOpenSnapshot);
     groupOpenSnapshot = null;
   }
 });
+
+/**
+ * 重複の一覧ダイアログの「場所を表示」で、このペインのアイテムが検索で隠れている場合は検索を解除する
+ * (祖先グループとペインの展開、フォーカスはストア側で済ませている)
+ */
+watch(
+  () => state.revealRequest,
+  (request) => {
+    if (!request || !searchQuery.value) return;
+    const found = findParentAndItem(request.itemId, props.items, props.items);
+    if (!found || matchesQuery(found.item, searchQuery.value.toLowerCase())) return;
+    searchQuery.value = "";
+  }
+);
 
 const emit = defineEmits<{
   (e: "update:isOpen", value: boolean): void;
@@ -117,7 +161,7 @@ const openPane = () => emit("update:isOpen", true);
         }}</span>
 
         <v-text-field
-          v-model="searchQuery"
+          v-model="searchInput"
           density="compact"
           variant="solo-filled"
           flat
@@ -184,7 +228,23 @@ const openPane = () => emit("update:isOpen", true);
         class="flex-grow-1 overflow-y-auto pa-2 bg-grey-darken-4 psm-scrollbar--dynamic"
         :class="scaleClass"
       >
+        <!-- 「有効のみ」: グループの枠なしでプロンプトだけを並べる (並び順がツリーと対応しないため、ドラッグでの並べ替えはできない) -->
+        <div
+          v-if="isFlatView && filterView"
+          class="psm-pane__flat-list d-flex flex-wrap align-center ga-1"
+          data-testid="flat-filter-list"
+        >
+          <PsmNode
+            v-for="entry in filterView.flatLeaves"
+            :key="entry.item.id"
+            :item="entry.item"
+            :parentChildren="entry.parentChildren"
+            :locked="entry.locked"
+            :is-parent-hidden="entry.inHiddenGroup"
+          />
+        </div>
         <draggable
+          v-else
           v-model="writableItems"
           item-key="id"
           v-bind="DRAG_OPTIONS"
@@ -197,6 +257,13 @@ const openPane = () => emit("update:isOpen", true);
             <PsmNode :item="element" :parentChildren="writableItems" />
           </template>
         </draggable>
+        <div
+          v-if="filterView && filterView.visibleIds.size === 0"
+          class="text-caption text-grey text-center py-4"
+          data-testid="filter-empty"
+        >
+          {{ t('viewFilterEmpty') }}
+        </div>
         <div
           class="d-flex justify-center ga-2 mt-4 pt-2 border-t border-dashed"
           data-testid="root-add-area"
@@ -264,6 +331,11 @@ div.psm-pane {
     text-orientation: mixed;
     letter-spacing: 2px;
     white-space: nowrap;
+  }
+
+  /* 「有効のみ」の一覧ではドラッグで並べ替えられないため、つかむカーソルを出さない */
+  div.psm-pane__flat-list :deep(.psm-node__drag-handle) {
+    cursor: default;
   }
 }
 

@@ -24,6 +24,7 @@ import {
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
 import { PsmItem } from "../types";
+import { EnabledView } from "../viewFilter";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -42,6 +43,8 @@ const props = defineProps<{
 }>();
 const openContextMenu = inject<Function>("psm-context-menu");
 const searchQuery = inject<Ref<string>>("search-query", ref(""));
+/** 表示フィルター (有効のみ / 有効(グループ付き)) の計算結果。フィルターが「すべて」の間は null */
+const filterView = inject<Ref<EnabledView | null>>("filter-view", ref(null));
 
 /**
  * 検索クエリに基づいて表示可否を決定する
@@ -103,6 +106,8 @@ const isInHiddenGroup = computed(() => {
 });
 
 const isVisible = computed(() => {
+  // 表示フィルター中は、検索も考慮済みの計算結果だけで決める (非表示グループの中も対象にする)
+  if (filterView.value) return filterView.value.visibleIds.has(props.item.id);
   // 検索中は非表示フラグを無視し、検索マッチのみで可視性を決定する
   // (非表示にした場所の中身が検索で見つからなくなる事故を防ぐ)
   if (searchQuery.value) return matchesSearchQuery.value;
@@ -133,12 +138,12 @@ const handleGroupHiddenToggle = () => {
   toggleGroupHidden(props.item);
 };
 
-// Auto-expand on search match
+// Auto-expand on search match (表示フィルター中も、該当するプロンプトを含むグループを開く)
 import { watch } from "vue";
 watch(
-  () => [isVisible.value, searchQuery.value],
-  ([visible, query]) => {
-    if (visible && query && props.item.is_group && !props.item.isOpen) {
+  () => [isVisible.value, searchQuery.value, !!filterView.value] as const,
+  ([visible, query, filtering]) => {
+    if (visible && (query || filtering) && props.item.is_group && !props.item.isOpen) {
       props.item.isOpen = true;
     }
   },

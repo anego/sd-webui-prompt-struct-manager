@@ -69,6 +69,10 @@
   - Duplicate prompts get an outer border and glow in the highlight color (warning color / error color) in addition to the chip color.
   - Every group containing a duplicate prompt (including all ancestor groups) also gets a thick border in the same highlight color as the prompt (warning color / error color). Even if the duplicate is inside a collapsed group or deep in nested groups, you can find it by following the highlighted borders.
 - **Validation Modes:** Choose from 3 validation modes in the settings: `None` (Disabled), `Warn` (Highlight warning only), or `Error` (Blocks generation/output when duplicates exist).
+- **Listing and resolving duplicates:** The warning/error dialog shown on apply lists the number of duplicated contents and the location of each occurrence (`Positive > Group > … > Prompt name`). Random groups get a dice icon (only one item is picked per generation, so they may not actually duplicate).
+  - **Disable:** Disables the prompt on the spot, and the list and the highlights in the tree update right away. Locked prompts cannot be disabled and get a lock icon.
+  - **Show Location:** Closes the dialog, opens the ancestor groups and the pane, then scrolls to and focuses the prompt. If the pane's search field is hiding it, the search is cleared.
+  - Once all duplicates are resolved, you can apply even in `Error` mode.
 - **Special Tokens Exclusion:** Structural keywords like `BREAK` that are intentionally used multiple times are excluded from duplicate checks. This also applies with a trailing comma, such as `BREAK,`.
 - **Hidden Groups Exclusion:** Prompts in hidden groups (including nested groups inside them) are excluded from duplicate checks.
 
@@ -94,6 +98,18 @@
 - **Visual indication:** While "Show Hidden Groups" is ON, hidden groups are shown semi-transparent with a dotted border and an eye-slash badge next to the group name.
 - **Excluded from duplicate checks:** Prompts in hidden groups (including nested groups inside them) are excluded from duplicate checks, even while "Show Hidden Groups" is ON.
 - **Interaction with locking:** A locked group's hidden state cannot be toggled either (treated the same as other group setting changes).
+
+### 1.11 View Filter
+- **Overview:** The radio buttons in the top toolbar switch which items the tree shows. The filter applies to both the Positive and Negative panes.
+  - **All:** Shows everything, including disabled prompts (the usual view).
+  - **Enabled Only:** Lists only the prompts actually added to the prompt (self and all ancestor groups enabled), in tree order, without group borders. Because the order no longer matches the tree, items cannot be reordered by dragging in this mode.
+  - **Enabled (with Groups):** Shows only the added prompts and the borders of the groups containing them, and opens those groups automatically.
+- **What counts as enabled:** A prompt that is enabled itself but sits in a disabled group is not added to the prompt, so it is not shown. Added prompts inside hidden groups are shown even while "Show Hidden Groups" is OFF.
+- **Combined with search:** Together with a pane's search field, only items that match both are shown.
+- **Editing:** Toggling, changing weights, editing and deleting work as usual. A prompt you disable disappears from the view right away. Up/down keyboard navigation visits only the items shown.
+- **Restoring open/closed state:** Groups auto-expanded by the filter return to their previous open/closed state when you switch back to "All".
+- **Not saved:** The filter choice is not saved and goes back to "All" when the WebUI is reloaded.
+- **While switching:** Redrawing the tree can take a while with many prompts, so a "Switching the view..." loading indicator is shown during the switch and input is blocked.
 
 ## 2. User Interface (UI/UX)
 

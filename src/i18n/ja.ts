@@ -118,6 +118,20 @@ export const ja = {
   duplicateWarnMessage: "有効なプロンプトに重複が見つかりました。\nこのまま反映しますか？",
   duplicateErrorTitle: "重複プロンプトエラー",
   duplicateErrorMessage: "有効なプロンプトに重複があるため反映できません。\n重複箇所を確認してください。",
+  duplicateCount: "{count} 件",
+  duplicateResolved: "重複はすべて解消されました。\nこのまま反映できます。",
+  duplicateDisableThis: "無効にする",
+  duplicateShowLocation: "場所を表示",
+  duplicateApplyAnyway: "このまま反映",
+  duplicateLockedHint: "ロック中のため無効にできません",
+
+  // 表示フィルター
+  viewFilterHint: "ツリーの表示フィルター (Positive / Negative 共通)",
+  viewFilterAll: "すべて",
+  viewFilterEnabled: "有効のみ",
+  viewFilterEnabledWithGroups: "有効 (グループ付き)",
+  viewFilterEmpty: "表示する項目がありません",
+  viewFilterApplying: "表示を切り替えています...",
   
   // File Dialogs
   createNewFile: "新規ファイル作成",

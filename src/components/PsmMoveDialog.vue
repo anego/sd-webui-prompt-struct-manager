@@ -13,11 +13,19 @@ import {
   MoveTarget,
 } from "../store";
 import PsmModal from "./PsmModal.vue";
+import { toInputText } from "../inputValue";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
 
 const query = ref("");
+/** 検索欄の v-model 用 (クリアボタンで null が入っても、絞り込みで trim が失敗しないよう空文字列に変換する) */
+const queryInput = computed({
+  get: () => query.value,
+  set: (value: string | null) => {
+    query.value = toInputText(value);
+  },
+});
 const activeIndex = ref(0);
 const searchInput = ref<{ focus: () => void } | null>(null);
 const listRef = ref<HTMLElement | null>(null);
@@ -131,7 +139,7 @@ const itemLabel = computed(() => {
 
         <v-text-field
           ref="searchInput"
-          v-model="query"
+          v-model="queryInput"
           :placeholder="t('moveFilterPlaceholder')"
           prepend-inner-icon="mdi-magnify"
           density="compact"

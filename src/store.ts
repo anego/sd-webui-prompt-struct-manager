@@ -1,5 +1,5 @@
-import { reactive, toRaw, watch } from "vue";
-import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange } from "./types";
+import { nextTick, reactive, toRaw, watch } from "vue";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange, ViewFilterMode, DuplicateGroup, DuplicateOccurrence, DuplicatePathGroup } from "./types";
 import { Logger, setDebugMode } from "./log";
 import { GENERATION_FIELDS, getActiveTabPrefix, captureGenerationSettings } from "./generationFields";
 
@@ -76,6 +76,12 @@ export const state = reactive({
   showWeightSlider: true,
   /** 非表示グループ (isHidden) をツリーに表示するかどうか */
   showHiddenGroups: false,
+  /** ツリーの表示フィルター (両ペイン共通。保存はしない) */
+  viewFilterMode: "all" as ViewFilterMode,
+  /** 切り替え中の表示フィルター (描画が終わるまでの間、ラジオボタンに選んだ値を先に表示するため) */
+  viewFilterPending: null as ViewFilterMode | null,
+  /** 指定アイテムを画面上で見つけられるようにする要求 (各ペインが検索で隠れていれば解除する。要求ごとに別オブジェクトにする) */
+  revealRequest: null as { itemId: number } | null,
   /** 保存されているプロファイル（ツリースナップショット） */
   profiles: [] as PsmProfile[],
   /** 現在選択（適用）されているプロファイル名 */
@@ -683,6 +689,103 @@ export const dismissParentActivationNotice = (): void => {
 export const setParentActivationMode = (mode: ParentActivationMode): void => {
   state.parentActivationMode = mode;
   saveSettingsLocal();
+};
+
+// -------------------------------------------------------------------------
+// 表示フィルター・アイテムの場所の表示
+// -------------------------------------------------------------------------
+
+const VIEW_FILTER_MODES: readonly ViewFilterMode[] = ["all", "enabled", "enabledWithGroups"];
+
+/** 値が ViewFilterMode として有効かを判定する (UIからの入力用) */
+export const isViewFilterMode = (value: unknown): value is ViewFilterMode =>
+  typeof value === "string" && VIEW_FILTER_MODES.some((mode) => mode === value);
+
+/**
+ * ツリーの表示フィルターを切り替える
+ * フィルターを付けたことを忘れてプロンプトが消えたように見えるのを防ぐため、ローカル設定には保存しない。
+ */
+export const setViewFilterMode = (mode: ViewFilterMode): void => {
+  state.viewFilterMode = mode;
+  Logger.debug(`[Store/ViewFilter] 表示フィルターを「${mode}」に切り替えました。`);
+};
+
+/** 非表示のタブでは requestAnimationFrame が呼ばれないため、描画を待つのを打ち切るまでの時間 */
+const PAINT_WAIT_FALLBACK_MS = 100;
+
+/**
+ * ここまでの画面の変更が描画されるのを待つ
+ * requestAnimationFrame の中で setTimeout を予約すると、そのフレームの描画後に実行される。
+ */
+const waitForNextPaint = (): Promise<void> =>
+  new Promise((resolve) => {
+    if (typeof requestAnimationFrame !== "function") {
+      setTimeout(resolve, 0);
+      return;
+    }
+    const fallback = setTimeout(resolve, PAINT_WAIT_FALLBACK_MS);
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        clearTimeout(fallback);
+        resolve();
+      }, 0);
+    });
+  });
+
+/** 表示フィルターの切り替え要求の通し番号 (描画を待つ間に別のモードが選ばれた場合に、古い要求を捨てるため) */
+let viewFilterRequestSeq = 0;
+
+/**
+ * ローディング表示を出してから、表示フィルターを切り替える (ツールバーのラジオボタン用)
+ * プロンプトが多いとツリーの再描画で画面が1秒以上止まるため、先にローディング表示を描画させてから切り替える。
+ * 再描画の間に押されたクリックが切り替え後のツリーに当たらないよう、切り替え後の描画を待ってから表示を消す。
+ */
+export const switchViewFilterMode = async (mode: ViewFilterMode): Promise<void> => {
+  if (mode === (state.viewFilterPending ?? state.viewFilterMode)) return;
+
+  const seq = ++viewFilterRequestSeq;
+  state.viewFilterPending = mode;
+  startLoading("viewFilterApplying");
+  try {
+    await waitForNextPaint();
+    if (seq !== viewFilterRequestSeq) {
+      Logger.debug(`[Store/ViewFilter] 描画を待つ間に別のフィルターが選ばれたため、「${mode}」への切り替えを取りやめました。`);
+      return;
+    }
+    const startedAt = performance.now();
+    setViewFilterMode(mode);
+    await nextTick();
+    Logger.debug(`[Store/ViewFilter] 表示フィルター「${mode}」でツリーを再描画しました。`, {
+      renderMs: Math.round(performance.now() - startedAt),
+    });
+    await waitForNextPaint();
+  } finally {
+    if (seq === viewFilterRequestSeq) state.viewFilterPending = null;
+    stopLoading();
+  }
+};
+
+/**
+ * 指定アイテムを画面上で見つけられるようにする (重複の一覧ダイアログの「場所を表示」用)
+ * 祖先グループとアイテムを含むペインを開いてフォーカスを当て、各ペインには検索で隠れていれば解除するよう要求する。
+ * スクロールは描画後に呼び出し側で行う。
+ * @returns ツリー内に見つからない場合は false
+ */
+export const revealItem = (itemId: number): boolean => {
+  const path = findNodePath(itemId);
+  if (!path) {
+    Logger.warn(`[Store/Reveal] ツリー内にID ${itemId} のアイテムが見つからないため、場所を表示できませんでした。`);
+    return false;
+  }
+  for (const { node } of path.slice(0, -1)) node.isOpen = true;
+  if (toRaw(path[0].siblings) === toRaw(state.positive)) {
+    state.posOpen = true;
+  } else {
+    state.negOpen = true;
+  }
+  state.focusedItemId = itemId;
+  state.revealRequest = { itemId };
+  return true;
 };
 
 /**
@@ -2899,44 +3002,50 @@ const normalizeForDuplicateCheck = (content: string): string => {
 };
 
 /**
- * 有効なプロンプトの中で重複しているテキストを抽出する
- * ポジティブ・ネガティブ全体を走査して判定。非表示グループ (配下を含む) は対象外。
- * 戻り値のテキストは正規化 (normalizeForDuplicateCheck) 済み。
+ * 有効なプロンプトの中で重複しているものを、内容ごとに場所付きで集める (重複の一覧ダイアログ用)
+ * ポジティブ・ネガティブ全体を走査して判定。無効な項目、無効なグループ・非表示グループの配下は対象外。
+ * 内容は正規化 (normalizeForDuplicateCheck) 済みで、最初に出現した順 (Positive → Negative のツリー順) に並ぶ。
  */
-export const detectDuplicates = (): Set<string> => {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-
+export const collectDuplicateOccurrences = (): DuplicateGroup[] => {
   // 複数回出現しても意味的に重複とは見なさない制御用キーワードを定義
   const IGNORED_TOKENS = new Set(["BREAK", "AND"]);
+  const byText = new Map<string, DuplicateOccurrence[]>();
 
-  const walk = (nodes: PsmItem[], parentDisabled: boolean) => {
+  const walk = (nodes: PsmItem[], pane: DuplicateOccurrence["pane"], groups: DuplicatePathGroup[], locked: boolean) => {
     for (const node of nodes) {
-      if (!node) continue;
-      const effectiveEnabled = node.enabled && !parentDisabled;
-
-      if (node.is_group && node.children) {
+      if (!node || !node.enabled) continue;
+      const nodeLocked = locked || !!node.isLocked;
+      if (node.is_group) {
         // 非表示グループは重複チェックの対象外とする (表示されないチップを重複として扱わないため)
-        if (node.isHidden) continue;
-        walk(node.children, !effectiveEnabled);
-      } else if (!node.is_group && effectiveEnabled) {
-        const text = normalizeForDuplicateCheck(node.content);
-        // 制御キーワードは重複チェックの対象外とする
-        if (text && !IGNORED_TOKENS.has(text.toUpperCase())) {
-          if (seen.has(text)) {
-            duplicates.add(text);
-          } else {
-            seen.add(text);
-          }
-        }
+        if (node.isHidden || !node.children) continue;
+        walk(node.children, pane, [...groups, { id: node.id, name: groupNameOf(node), isRandom: !!node.isRandom }], nodeLocked);
+        continue;
+      }
+      const text = normalizeForDuplicateCheck(node.content);
+      // 制御キーワードは重複チェックの対象外とする
+      if (!text || IGNORED_TOKENS.has(text.toUpperCase())) continue;
+      const occurrence: DuplicateOccurrence = { item: node, pane, groups, locked: nodeLocked };
+      const list = byText.get(text);
+      if (list) {
+        list.push(occurrence);
+      } else {
+        byText.set(text, [occurrence]);
       }
     }
   };
 
-  walk(state.positive, false);
-  walk(state.negative, false);
-  return duplicates;
+  walk(state.positive, "positive", [], false);
+  walk(state.negative, "negative", [], false);
+  return [...byText.entries()]
+    .filter(([, occurrences]) => occurrences.length > 1)
+    .map(([text, occurrences]) => ({ text, occurrences }));
 };
+
+/**
+ * 有効なプロンプトの中で重複しているテキストを抽出する
+ * 判定の条件は collectDuplicateOccurrences と同じ。戻り値のテキストは正規化 (normalizeForDuplicateCheck) 済み。
+ */
+export const detectDuplicates = (): Set<string> => new Set(collectDuplicateOccurrences().map((group) => group.text));
 
 /**
  * 重複の強調表示をクリアする
@@ -2944,6 +3053,38 @@ export const detectDuplicates = (): Set<string> => {
 export const clearDuplicateHighlight = () => {
   state.duplicateTexts.clear();
   state.duplicateHighlightLevel = null;
+};
+
+/**
+ * 重複の強調表示中に、現在のツリーで重複を数え直し、強調を残っている重複だけに更新する
+ * 重複がすべて解消された場合は強調表示を消す。
+ */
+export const refreshDuplicateHighlight = (): void => {
+  if (!state.duplicateHighlightLevel) return;
+  const duplicates = detectDuplicates();
+  if (duplicates.size === 0) {
+    clearDuplicateHighlight();
+    return;
+  }
+  state.duplicateTexts = duplicates;
+};
+
+/**
+ * 重複の一覧ダイアログから、重複しているプロンプトの1か所を無効にして保存する
+ * 無効にしたあとは重複を数え直し、強調表示も残っている重複だけに更新する。
+ */
+export const disableDuplicateOccurrence = async (item: PsmItem): Promise<void> => {
+  if (!item.enabled) return;
+  if (isItemLocked(item.id)) {
+    Logger.warn(`[Store/Duplicate] 「${item.name || item.content}」はロック中のため、重複の一覧から無効にできませんでした。`);
+    return;
+  }
+  await requestToggleEnabled(item);
+  refreshDuplicateHighlight();
+  Logger.info(`[Store/Duplicate] 重複の一覧から「${item.name || item.content}」を無効にしました。`, {
+    itemId: item.id,
+    remainingDuplicates: detectDuplicates().size,
+  });
 };
 
 /**

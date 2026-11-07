@@ -6,18 +6,31 @@
  */
 import { PsmItem } from "../types";
 import { state, startEdit, startDeleteConfirm, requestToggleEnabled, addItem, findParentAndItem } from "../store";
+import { buildEnabledView } from "../viewFilter";
 
-// 表示中のアイテムを再帰的にフラット化するヘルパー
-const getVisibleFlatList = (nodes: PsmItem[]): PsmItem[] => {
+/**
+ * 表示中のアイテムを再帰的にフラット化するヘルパー
+ * @param visibleIds 表示フィルター「有効(グループ付き)」で表示する項目のID (null の場合は絞り込まない)
+ */
+const getVisibleFlatList = (nodes: PsmItem[], visibleIds: Set<number> | null = null): PsmItem[] => {
   const list: PsmItem[] = [];
   for (const node of nodes) {
     if (!node) continue;
+    if (visibleIds && !visibleIds.has(node.id)) continue;
     list.push(node);
     if (node.is_group && node.isOpen && node.children) {
-      list.push(...getVisibleFlatList(node.children));
+      list.push(...getVisibleFlatList(node.children, visibleIds));
     }
   }
   return list;
+};
+
+/** 1つのペインで、表示フィルターに合わせて表示中のアイテムを画面の順に並べる (検索欄の絞り込みは考慮しない) */
+const getPaneVisibleItems = (nodes: PsmItem[]): PsmItem[] => {
+  if (state.viewFilterMode === "all") return getVisibleFlatList(nodes);
+  const view = buildEnabledView(nodes);
+  if (state.viewFilterMode === "enabled") return view.flatLeaves.map((entry) => entry.item);
+  return getVisibleFlatList(nodes, view.visibleIds);
 };
 
 export const useKeyboardNav = (callbacks?: { onContextMenu?: () => void }) => {
@@ -29,8 +42,8 @@ export const useKeyboardNav = (callbacks?: { onContextMenu?: () => void }) => {
   const getAllVisibleItems = () => {
     // コンテキストに応じた処理や、Positive/Negativeの結合順序を定義
     // ここでは単純に Positive -> Negative の順で結合します
-    const pos = state.posOpen ? getVisibleFlatList(state.positive) : [];
-    const neg = state.negOpen ? getVisibleFlatList(state.negative) : [];
+    const pos = state.posOpen ? getPaneVisibleItems(state.positive) : [];
+    const neg = state.negOpen ? getPaneVisibleItems(state.negative) : [];
     return [...pos, ...neg];
   };
 
