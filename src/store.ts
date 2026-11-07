@@ -1,5 +1,5 @@
 import { nextTick, reactive, toRaw, watch } from "vue";
-import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange, ViewFilterMode, DuplicateGroup, DuplicateOccurrence, DuplicatePathGroup, FileRepairNotice } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange, ViewFilterMode, DuplicateGroup, DuplicateOccurrence, DuplicatePathGroup, FileRepairNotice, PaneName, RevealRequest } from "./types";
 import { Logger, setDebugMode } from "./log";
 import { createItemId, repairItemIds, reserveItemIds, ItemIdRepairInput } from "./itemId";
 import { convertForeignNodes } from "./foreignFormat";
@@ -84,8 +84,10 @@ export const state = reactive({
   viewFilterMode: "all" as ViewFilterMode,
   /** 切り替え中の表示フィルター (描画が終わるまでの間、ラジオボタンに選んだ値を先に表示するため) */
   viewFilterPending: null as ViewFilterMode | null,
-  /** 指定アイテムを画面上で見つけられるようにする要求 (各ペインが検索で隠れていれば解除する。要求ごとに別オブジェクトにする) */
-  revealRequest: null as { itemId: number } | null,
+  /** 指定アイテムを画面上で見つけられるようにする要求 (各ペインが、検索で隠れていれば解除し、開いたグループを絞り込みの解除後も開いたままにする。要求ごとに別オブジェクトにする) */
+  revealRequest: null as RevealRequest | null,
+  /** 各ペインの検索欄の入力 (キーボードの上下移動でも、画面と同じ絞り込みを使うためストアで持つ) */
+  paneSearchQuery: { positive: "", negative: "" } as Record<PaneName, string>,
   /** 保存されているプロファイル（ツリースナップショット） */
   profiles: [] as PsmProfile[],
   /** 現在選択（適用）されているプロファイル名 */
@@ -781,14 +783,15 @@ export const revealItem = (itemId: number): boolean => {
     Logger.warn(`[Store/Reveal] ツリー内にID ${itemId} のアイテムが見つからないため、場所を表示できませんでした。`);
     return false;
   }
-  for (const { node } of path.slice(0, -1)) node.isOpen = true;
+  const ancestors = path.slice(0, -1).map((entry) => entry.node);
+  for (const group of ancestors) group.isOpen = true;
   if (toRaw(path[0].siblings) === toRaw(state.positive)) {
     state.posOpen = true;
   } else {
     state.negOpen = true;
   }
   state.focusedItemId = itemId;
-  state.revealRequest = { itemId };
+  state.revealRequest = { itemId, groupIds: ancestors.map((group) => group.id) };
   return true;
 };
 
@@ -2808,6 +2811,19 @@ export const snapshotGroupOpenState = (nodes: PsmItem[]): Map<number, boolean> =
 };
 
 /**
+ * 開閉状態のスナップショットで、指定したグループを「開」にしたものを返す (元のスナップショットは変更しない)
+ * 「場所を表示」で開いたグループが、検索・表示フィルターの解除時の復元で閉じられないようにするため。
+ * スナップショットに無いグループ (絞り込み中に追加されたもの) は、復元の対象外のため追加しない。
+ */
+export const withGroupsOpen = (snapshot: ReadonlyMap<number, boolean>, groupIds: readonly number[]): Map<number, boolean> => {
+  const updated = new Map(snapshot);
+  for (const id of groupIds) {
+    if (updated.has(id)) updated.set(id, true);
+  }
+  return updated;
+};
+
+/**
  * フィルター機能用: snapshotGroupOpenState で保存した開閉状態を復元する
  * フィルター中に追加/削除されたグループは対象外 (スナップショットに存在するidのみ復元)
  */
@@ -3047,11 +3063,11 @@ export const setToggleShortcut = async (shortcut: string) => {
 
 /**
  * 重複チェック用にプロンプトの内容を正規化する
- * 末尾のカンマは出力時に除去されるため、"on stomach," と "on stomach" は同じプロンプトとして扱う。
+ * 末尾のカンマはタグの区切りで内容は同じタグのため、"on stomach,"・"on stomach, ," と "on stomach" は同じプロンプトとして扱う。
  * (BREAK区切り線の表示判定と同じく、"BREAK," も制御キーワードの BREAK として扱われる)
  */
 const normalizeForDuplicateCheck = (content: string): string => {
-  return (content || "").trim().replace(/\s*,$/, "");
+  return (content || "").trim().replace(/(\s*,)+$/, "");
 };
 
 /**
@@ -3133,10 +3149,15 @@ export const disableDuplicateOccurrence = async (item: PsmItem): Promise<void> =
     return;
   }
   await requestToggleEnabled(item);
+  // ツリーから見つからないなどで切り替えられなかった場合は、無効にしたと記録しない
+  if (item.enabled) {
+    Logger.warn(`[Store/Duplicate] 「${item.name || item.content}」の有効/無効を切り替えられなかったため、重複の一覧から無効にできませんでした。`, { itemId: item.id });
+    return;
+  }
   refreshDuplicateHighlight();
   Logger.info(`[Store/Duplicate] 重複の一覧から「${item.name || item.content}」を無効にしました。`, {
     itemId: item.id,
-    remainingDuplicates: detectDuplicates().size,
+    remainingHighlightedDuplicates: state.duplicateTexts.size,
   });
 };
 

@@ -8,6 +8,7 @@ import { computed, nextTick, watch, onUnmounted } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { collectDuplicateOccurrences, disableDuplicateOccurrence, revealItem } from "../store";
 import { DuplicateGroup, DuplicateOccurrence } from "../types";
+import { findNodeElement } from "../webUiRoot";
 import PsmModal from "./PsmModal.vue";
 
 const { t } = useI18n();
@@ -55,7 +56,7 @@ const handleShowLocation = async (occurrence: DuplicateOccurrence) => {
   if (!revealItem(occurrence.item.id)) return;
   emit("update:modelValue", false);
   await nextTick();
-  document.getElementById(`node-${occurrence.item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  findNodeElement(occurrence.item.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
 };
 
 const handleKeydown = (e: KeyboardEvent) => {

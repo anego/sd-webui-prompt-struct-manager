@@ -46,16 +46,12 @@ import PsmInfotextDialog from "./components/PsmInfotextDialog.vue";
 import PsmMoveDialog from "./components/PsmMoveDialog.vue";
 import PsmGenerationProfileDialog from "./components/PsmGenerationProfileDialog.vue";
 import { useI18n } from "./composables/useI18n";
+import { getWebUiRoot } from "./webUiRoot";
 
 const { t } = useI18n();
 
 const buildTimestamp = __BUILD_TIMESTAMP__;
 const psmVersion = __PSM_VERSION__;
-
-const getWebUiRoot = (): Document | ShadowRoot => {
-  const gradioApp = document.querySelector("gradio-app");
-  return gradioApp?.shadowRoot || document;
-};
 
 // ダイアログの表示状態管理
 const dialogs = ref({
@@ -745,6 +741,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
                />
 
                <PsmTreePane
+                 pane="positive"
                  :title="t('positive')"
                  icon="mdi-thumb-up"
                  color="blue"
@@ -753,6 +750,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
                />
 
                <PsmTreePane
+                 pane="negative"
                  :title="t('negative')"
                  icon="mdi-thumb-down"
                  color="red"

@@ -121,10 +121,13 @@ export interface DuplicatePathGroup {
   isRandom: boolean;
 }
 
+/** プロンプトのペイン */
+export type PaneName = "positive" | "negative";
+
 /** 重複しているプロンプトの1か所 */
 export interface DuplicateOccurrence {
   item: PsmItem;
-  pane: "positive" | "negative";
+  pane: PaneName;
   /** ルートから親までのグループ (外側から順。ルート直下のプロンプトは空) */
   groups: DuplicatePathGroup[];
   /** 自身または祖先グループがロック中のため、無効にできない */
@@ -144,6 +147,16 @@ export interface DuplicateGroup {
  * - "enabledWithGroups": 実際に反映されるプロンプトを、それを含むグループの枠の中に表示する
  */
 export type ViewFilterMode = "all" | "enabled" | "enabledWithGroups";
+
+/**
+ * アイテムを画面上で見つけられるようにする要求 (重複の一覧ダイアログの「場所を表示」)
+ * 要求ごとに別オブジェクトにして、同じアイテムを続けて表示しても各ペインの watch が反応するようにする。
+ */
+export interface RevealRequest {
+  itemId: number;
+  /** 表示のために開いた祖先グループのID (検索・表示フィルターの解除で、元の閉じた状態に戻さないようにするため) */
+  groupIds: number[];
+}
 
 /**
  * 親グループが無効な項目を有効にしようとしたときの挙動 (localStorage "psm_settings" に保存)

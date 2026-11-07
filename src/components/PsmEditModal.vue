@@ -7,6 +7,7 @@ import { computed, ref, watch, nextTick, onUnmounted } from "vue";
 import { state, finishEdit, cancelEdit, startDeleteConfirm, translateText, suggestCategoryForGroup } from "../store";
 import PsmModal from "./PsmModal.vue";
 import { useI18n } from "../composables/useI18n";
+import { getWebUiRoot } from "../webUiRoot";
 
 const { t } = useI18n();
 
@@ -167,11 +168,6 @@ const restoreDictionaryPanel = () => {
   originalParent = null;
   originalNextSibling = null;
   movedPanel = null;
-};
-
-const getWebUiRoot = (): Document | ShadowRoot => {
-  const gradioApp = document.querySelector("gradio-app");
-  return gradioApp?.shadowRoot || document;
 };
 
 /**

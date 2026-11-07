@@ -8,6 +8,7 @@ import { computed, ref } from "vue";
 import { state } from "../store";
 import { buildGroupMap, GroupMapItem } from "../groupMapUtils";
 import { useI18n } from "../composables/useI18n";
+import { findNodeElement } from "../webUiRoot";
 
 const { t } = useI18n();
 const isHovered = ref(false);
@@ -25,7 +26,7 @@ const itemTitle = (item: GroupMapItem): string =>
 const groupList = computed(() => buildGroupMap(state.positive, state.negative));
 
 const scrollToNode = (id: number) => {
-  const el = document.getElementById(`node-${id}`);
+  const el = findNodeElement(id);
   if (el) {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     // 少しハイライトさせると分かりやすいかもしれないが、今回はスクロールのみ

@@ -4,10 +4,10 @@
  * Positive/Negativeプロンプトのツリーを表示・操作するためのペイン領域です。
  * ヘッダー、開閉機能、およびルートアイテムへの追加ボタンを持ちます。
  */
-import { computed, ref, provide, watch } from "vue";
+import { computed, provide, watch } from "vue";
 import draggable from "vuedraggable";
 import PsmNode from "./PsmNode.vue";
-import { PsmItem } from "../types";
+import { PaneName, PsmItem } from "../types";
 import {
   addItem,
   savePrompts,
@@ -23,29 +23,18 @@ import {
   restoreGroupOpenState,
   requestDisableAll,
   findParentAndItem,
+  withGroupsOpen,
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
-import { buildEnabledView, matchesQuery } from "../viewFilter";
+import { buildEnabledView, isHiddenBySearch } from "../viewFilter";
 import { toInputText } from "../inputValue";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
 
-const searchQuery = ref("");
-provide("search-query", searchQuery);
-
-/**
- * 検索欄の v-model 用
- * クリアボタンで null が入ると、表示フィルターの計算などで toLowerCase が失敗するため、空文字列に変換して保持する。
- */
-const searchInput = computed({
-  get: () => searchQuery.value,
-  set: (value: string | null) => {
-    searchQuery.value = toInputText(value);
-  },
-});
-
 const props = defineProps<{
+  /** ペインの種類 (検索欄の入力をストアで持つためのキー) */
+  pane: PaneName;
   /** ペインタイトル (例: Positive) */
   title: string;
   /** ヘッダーアイコン (mdi name) */
@@ -57,6 +46,21 @@ const props = defineProps<{
   /** ペインの開閉状態 (v-model:isOpen) */
   isOpen: boolean;
 }>();
+
+/** このペインの検索欄の入力 (キーボードの上下移動でも同じ絞り込みを使うため、ストアで持つ) */
+const searchQuery = computed(() => state.paneSearchQuery[props.pane]);
+provide("search-query", searchQuery);
+
+/**
+ * 検索欄の v-model 用
+ * クリアボタンで null が入ると、表示フィルターの計算などで toLowerCase が失敗するため、空文字列に変換して保持する。
+ */
+const searchInput = computed({
+  get: () => searchQuery.value,
+  set: (value: string | null) => {
+    state.paneSearchQuery[props.pane] = toInputText(value);
+  },
+});
 
 /**
  * 表示フィルター (有効のみ / 有効(グループ付き)) で表示する項目
@@ -89,16 +93,20 @@ watch(isFiltering, (filtering, wasFiltering) => {
 });
 
 /**
- * 重複の一覧ダイアログの「場所を表示」で、このペインのアイテムが検索で隠れている場合は検索を解除する
+ * 重複の一覧ダイアログの「場所を表示」で、このペインのアイテムが見えるようにする
  * (祖先グループとペインの展開、フォーカスはストア側で済ませている)
+ * 検索・表示フィルターを解除したときの開閉状態の復元で、表示のために開いたグループが閉じないよう、スナップショットも「開」にする。
+ * スナップショットの更新は検索の解除より先に行う (検索の解除で絞り込みが終わると、その場で復元されるため)。
  */
 watch(
   () => state.revealRequest,
   (request) => {
-    if (!request || !searchQuery.value) return;
+    if (!request) return;
     const found = findParentAndItem(request.itemId, props.items, props.items);
-    if (!found || matchesQuery(found.item, searchQuery.value.toLowerCase())) return;
-    searchQuery.value = "";
+    if (!found) return;
+    if (groupOpenSnapshot) groupOpenSnapshot = withGroupsOpen(groupOpenSnapshot, request.groupIds);
+    if (!isHiddenBySearch(props.items, found.item, { mode: state.viewFilterMode, query: searchQuery.value })) return;
+    state.paneSearchQuery[props.pane] = "";
   }
 );
 

@@ -420,6 +420,24 @@ describe("detectDuplicates - 重複プロンプト検出", () => {
     // 末尾のカンマと前後の空白を除いたテキストで記録される
     expect([...duplicates].sort()).toEqual(["masterpiece, best quality", "on stomach"]);
   });
+
+  it("2.17 末尾にカンマが2つ以上続くプロンプトも、カンマを除いたテキストで重複検出されること", () => {
+    // Arrange
+    state.positive = [
+      { id: 1, name: "p1", content: "smile", enabled: true, weight: 1.0, memo: "", is_group: false },
+      { id: 2, name: "p2", content: "smile,,", enabled: true, weight: 1.0, memo: "", is_group: false },
+      { id: 3, name: "p3", content: "smile , , ", enabled: true, weight: 1.0, memo: "", is_group: false },
+    ];
+    state.negative = [];
+
+    // Act
+    const duplicates = detectDuplicates();
+    const occurrences = collectDuplicateOccurrences();
+
+    // Assert
+    expect([...duplicates]).toEqual(["smile"]);
+    expect(occurrences.map((g) => [g.text, g.occurrences.length])).toEqual([["smile", 3]]);
+  });
 });
 
 import { containsDuplicatePrompt, isDuplicateHighlighted, clearDuplicateHighlight } from "../src/store";
@@ -3919,11 +3937,13 @@ import {
   setViewFilterMode,
   isViewFilterMode,
   switchViewFilterMode,
+  withGroupsOpen,
 } from "../src/store";
+import { isTreeKeyboardBlocked, listKeyboardTargets, TreeKeyboardState } from "../src/composables/useKeyboardNav";
 
 describe("重複の一覧ダイアログ・場所の表示・表示フィルター", () => {
   const leaf = (id: number, content: string, enabled = true): PsmItem => ({
-    id, name: `n${id}`, content, enabled, weight: 1.0, is_group: false,
+    id, name: `n${id}`, content, enabled, weight: 1.0, memo: "", is_group: false,
   });
   const grp = (
     id: number,
@@ -3935,6 +3955,7 @@ describe("重複の一覧ダイアログ・場所の表示・表示フィルタ�
     content: "",
     enabled: options.enabled ?? true,
     weight: 1.0,
+    memo: "",
     is_group: true,
     isOpen: options.isOpen ?? true,
     isRandom: options.isRandom,
@@ -4060,6 +4081,28 @@ describe("重複の一覧ダイアログ・場所の表示・表示フィルタ�
     expect(saveCalls()).toHaveLength(0);
   });
 
+  it("23.20 disableDuplicateOccurrence: ツリーに無いプロンプト (読み込み直し前の古い一覧など) は無効にできず、警告して強調表示も変えないこと", async () => {
+    // Arrange
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    state.positive = [leaf(1, "smile"), leaf(2, "smile")];
+    state.negative = [];
+    state.duplicateTexts = new Set(["smile", "frown"]);
+    state.duplicateHighlightLevel = "error";
+    const staleItem = leaf(99, "smile");
+
+    // Act
+    await disableDuplicateOccurrence(staleItem);
+    await flush();
+
+    // Assert
+    expect(staleItem.enabled).toBe(true);
+    expect(saveCalls()).toHaveLength(0);
+    expect([...state.duplicateTexts]).toEqual(["smile", "frown"]);
+    const messages = warnSpy.mock.calls.map((call) => String(call[0]));
+    expect(messages.some((m) => m.includes("重複の一覧から無効にできませんでした"))).toBe(true);
+    warnSpy.mockRestore();
+  });
+
   it("23.6 refreshDuplicateHighlight: 強調表示中でなければ何もしないこと", () => {
     // Arrange
     state.positive = [leaf(1, "smile"), leaf(2, "smile")];
@@ -4093,8 +4136,52 @@ describe("重複の一覧ダイアログ・場所の表示・表示フィルタ�
     expect(state.negOpen).toBe(true);
     expect(state.posOpen).toBe(false);
     expect(state.focusedItemId).toBe(12);
-    expect(state.revealRequest).toEqual({ itemId: 12 });
+    // 開いた祖先グループのIDを外側から順に含める (ペインが絞り込みの解除で閉じ直さないようにするため)
+    expect(state.revealRequest).toEqual({ itemId: 12, groupIds: [10, 11] });
     expect(state.revealRequest).not.toBe(firstRequest);
+  });
+
+  it("23.17 revealItem: ルート直下のアイテムでは、開いたグループのIDを空にすること", () => {
+    // Arrange
+    state.positive = [leaf(1, "smile")];
+    state.negative = [];
+
+    // Act
+    revealItem(1);
+
+    // Assert
+    expect(state.revealRequest).toEqual({ itemId: 1, groupIds: [] });
+    expect(state.posOpen).toBe(true);
+  });
+
+  it("23.18 withGroupsOpen: スナップショットにあるグループだけを「開」にした新しいスナップショットを返し、元は変えないこと", () => {
+    // Arrange
+    const snapshot = new Map<number, boolean>([[10, false], [11, false], [20, false]]);
+
+    // Act
+    const updated = withGroupsOpen(snapshot, [10, 11, 99]);
+
+    // Assert
+    expect([...updated]).toEqual([[10, true], [11, true], [20, false]]);
+    expect([...snapshot]).toEqual([[10, false], [11, false], [20, false]]);
+  });
+
+  it("23.19 withGroupsOpen で更新したスナップショットから戻すと、場所の表示で開いたグループは開いたままになること", () => {
+    // Arrange: 検索の開始時に保存した開閉状態 (すべて閉じている)
+    state.positive = [grp(10, [grp(11, [leaf(12, "smile")], { isOpen: false })], { isOpen: false }), grp(20, [leaf(21, "frown")], { isOpen: false })];
+    state.negative = [];
+    const snapshot = snapshotGroupOpenState(state.positive);
+    nodeOf(20).isOpen = true; // 検索中の自動展開で開いたグループ
+    revealItem(12);
+    const groupIds = state.revealRequest?.groupIds ?? [];
+
+    // Act
+    restoreGroupOpenState(state.positive, withGroupsOpen(snapshot, groupIds));
+
+    // Assert
+    expect(nodeOf(10).isOpen).toBe(true);
+    expect(nodeOf(11).isOpen).toBe(true);
+    expect(nodeOf(20).isOpen).toBe(false);
   });
 
   it("23.8 revealItem: ツリーに無いIDでは何も変更せず false を返すこと", () => {
@@ -4266,6 +4353,9 @@ describe("重複の一覧ダイアログ・場所の表示・表示フィルタ�
       state.isEditing = false;
       state.isDeleting = false;
       state.disableAllConfirm = null;
+      state.isLoading = false;
+      state.showHiddenGroups = false;
+      state.paneSearchQuery = { positive: "", negative: "" };
       state.posOpen = true;
       state.positive = [
         grp(1, [leaf(2, "walk"), leaf(3, "run", false), grp(4, [leaf(5, "sit", false)])]),
@@ -4277,6 +4367,9 @@ describe("重複の一覧ダイアログ・場所の表示・表示フィルタ�
 
     afterEach(() => {
       state.isVisible = false;
+      state.isLoading = false;
+      state.showHiddenGroups = false;
+      state.paneSearchQuery = { positive: "", negative: "" };
     });
 
     it("23.10 「有効のみ」では、反映される有効なプロンプトだけを順にたどること", () => {
@@ -4299,6 +4392,88 @@ describe("重複の一覧ダイアログ・場所の表示・表示フィルタ�
 
       // Assert
       expect(focused).toEqual([1, 2, 8, 8]);
+    });
+
+    it("23.21 「すべて」で検索中は、検索欄の絞り込みで表示されている項目だけをたどること", () => {
+      // Arrange
+      state.paneSearchQuery.positive = "WALK";
+
+      // Act
+      const focused = walkFocus(3);
+
+      // Assert
+      // 子孫が一致するグループ 1 と、一致するプロンプト 2 だけ (大文字小文字は区別しない)
+      expect(focused).toEqual([1, 2, 2]);
+    });
+
+    it("23.22 「有効(グループ付き)」で検索中は、表示フィルターと検索の両方で残った項目だけをたどること", () => {
+      // Arrange
+      setViewFilterMode("enabledWithGroups");
+      state.paneSearchQuery.positive = "1girl";
+
+      // Act
+      const focused = walkFocus(2);
+
+      // Assert
+      expect(focused).toEqual([8, 8]);
+    });
+
+    it("23.23 検索欄の絞り込みは、ペインごとの入力だけを使うこと", () => {
+      // Arrange
+      state.negOpen = true;
+      state.negative = [leaf(30, "walk"), leaf(31, "lowres")];
+      state.paneSearchQuery.positive = "walk";
+
+      // Act
+      const targets = listKeyboardTargets();
+
+      // Assert
+      expect(targets.map((item) => item.id)).toEqual([1, 2, 30, 31]);
+    });
+
+    it("23.24 「すべて」で検索なしの場合、非表示グループとその中身は、表示設定がオンのときだけたどること", () => {
+      // Arrange
+      state.positive = [leaf(1, "smile"), grp(2, [leaf(3, "secret")], { isHidden: true }), leaf(4, "frown")];
+      const hiddenOff = listKeyboardTargets().map((item) => item.id);
+      state.showHiddenGroups = true;
+
+      // Act
+      const hiddenOn = listKeyboardTargets().map((item) => item.id);
+
+      // Assert
+      expect(hiddenOff).toEqual([1, 4]);
+      expect(hiddenOn).toEqual([1, 2, 3, 4]);
+    });
+
+    it("23.25 ファイルの読み込み中は、矢印キーでフォーカスを動かさないこと", () => {
+      // Arrange
+      state.isLoading = true;
+
+      // Act
+      pressArrowDown();
+
+      // Assert
+      expect(state.focusedItemId).toBeNull();
+    });
+
+    it("23.26 isTreeKeyboardBlocked: ダイアログの表示中・画面が非表示・読み込み中のいずれかでキー操作を受け付けないこと", () => {
+      // Arrange
+      const idle: TreeKeyboardState = { isEditing: false, isDeleting: false, disableAllConfirm: null, isVisible: true, isLoading: false };
+      const variants: TreeKeyboardState[] = [
+        { ...idle, isEditing: true },
+        { ...idle, isDeleting: true },
+        { ...idle, disableAllConfirm: { title: "Positive", items: [] } },
+        { ...idle, isVisible: false },
+        { ...idle, isLoading: true },
+      ];
+
+      // Act
+      const idleBlocked = isTreeKeyboardBlocked(idle);
+      const variantsBlocked = variants.map(isTreeKeyboardBlocked);
+
+      // Assert
+      expect(idleBlocked).toBe(false);
+      expect(variantsBlocked).toEqual([true, true, true, true, true]);
     });
   });
 });

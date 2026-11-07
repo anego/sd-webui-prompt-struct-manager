@@ -4,48 +4,40 @@
  * 
  * @param callbacks 各種イベントコールバック (context menuなど)
  */
-import { PsmItem } from "../types";
+import { PaneName, PsmItem } from "../types";
 import { state, startEdit, startDeleteConfirm, requestToggleEnabled, addItem, findParentAndItem } from "../store";
-import { buildEnabledView } from "../viewFilter";
+import { listNavigableItems } from "../viewFilter";
+
+/** ツリーのキー操作を受け付けるかの判定に使う状態 */
+export type TreeKeyboardState = Pick<typeof state, "isEditing" | "isDeleting" | "disableAllConfirm" | "isVisible" | "isLoading">;
 
 /**
- * 表示中のアイテムを再帰的にフラット化するヘルパー
- * @param visibleIds 表示フィルター「有効(グループ付き)」で表示する項目のID (null の場合は絞り込まない)
+ * ツリーのキー操作を受け付けない状態か
+ * 編集・削除確認・一括無効の確認のダイアログ表示中と、画面が非表示の間に加えて、
+ * ファイルの読み込み中も受け付けない (読み込みで差し替わる前のツリーを操作して、保存で上書きしてしまうため)。
  */
-const getVisibleFlatList = (nodes: PsmItem[], visibleIds: Set<number> | null = null): PsmItem[] => {
-  const list: PsmItem[] = [];
-  for (const node of nodes) {
-    if (!node) continue;
-    if (visibleIds && !visibleIds.has(node.id)) continue;
-    list.push(node);
-    if (node.is_group && node.isOpen && node.children) {
-      list.push(...getVisibleFlatList(node.children, visibleIds));
-    }
-  }
-  return list;
-};
+export const isTreeKeyboardBlocked = (s: TreeKeyboardState): boolean =>
+  s.isEditing || s.isDeleting || !!s.disableAllConfirm || !s.isVisible || s.isLoading;
 
-/** 1つのペインで、表示フィルターに合わせて表示中のアイテムを画面の順に並べる (検索欄の絞り込みは考慮しない) */
-const getPaneVisibleItems = (nodes: PsmItem[]): PsmItem[] => {
-  if (state.viewFilterMode === "all") return getVisibleFlatList(nodes);
-  const view = buildEnabledView(nodes);
-  if (state.viewFilterMode === "enabled") return view.flatLeaves.map((entry) => entry.item);
-  return getVisibleFlatList(nodes, view.visibleIds);
-};
+/** 1つのペインで、画面に表示中のアイテムを画面の順に並べる (表示フィルターと検索欄の絞り込みを考慮する) */
+const listPaneItems = (pane: PaneName): PsmItem[] =>
+  listNavigableItems(state[pane], {
+    mode: state.viewFilterMode,
+    query: state.paneSearchQuery[pane],
+    showHiddenGroups: state.showHiddenGroups,
+  });
+
+/**
+ * キーボード操作の対象になる、画面に表示中の全アイテム (Positive → Negative の順)
+ * 閉じているペインと、閉じているグループの中身は含めない。
+ */
+export const listKeyboardTargets = (): PsmItem[] => [
+  ...(state.posOpen ? listPaneItems("positive") : []),
+  ...(state.negOpen ? listPaneItems("negative") : []),
+];
 
 export const useKeyboardNav = (callbacks?: { onContextMenu?: () => void }) => {
-  /**
-   * 現在表示されている全てのアイテム（Positive/Negative両方）を
-   * フラットなリストとして取得する
-   * 開いているグループの子要素も再帰的に含まれます。
-   */
-  const getAllVisibleItems = () => {
-    // コンテキストに応じた処理や、Positive/Negativeの結合順序を定義
-    // ここでは単純に Positive -> Negative の順で結合します
-    const pos = state.posOpen ? getPaneVisibleItems(state.positive) : [];
-    const neg = state.negOpen ? getPaneVisibleItems(state.negative) : [];
-    return [...pos, ...neg];
-  };
+  const getAllVisibleItems = listKeyboardTargets;
 
   /**
    * フォーカスを移動する
@@ -96,7 +88,7 @@ export const useKeyboardNav = (callbacks?: { onContextMenu?: () => void }) => {
        return;
     }
 
-    if (state.isEditing || state.isDeleting || state.disableAllConfirm || !state.isVisible) return;
+    if (isTreeKeyboardBlocked(state)) return;
 
     switch (e.key) {
       case "ArrowDown":

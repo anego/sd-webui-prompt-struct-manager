@@ -24,7 +24,7 @@ import {
 } from "../store";
 import { DRAG_OPTIONS } from "../dragOptions";
 import { PsmItem } from "../types";
-import { EnabledView } from "../viewFilter";
+import { EnabledView, matchesQueryDeep } from "../viewFilter";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -48,46 +48,9 @@ const filterView = inject<Ref<EnabledView | null>>("filter-view", ref(null));
 
 /**
  * 検索クエリに基づいて表示可否を決定する
- * 自分自身または子孫のいずれかが一致すれば表示される (フィルタリング)
+ * 自分自身または子孫のいずれかが一致すれば表示される (キーボードの上下移動と同じ判定を使う)
  */
-const matchesSearchQuery = computed(() => {
-  const q = searchQuery.value.toLowerCase();
-  // Safe match function handling null/undefined
-  const match = (s: string | undefined | null) => {
-    if (!s) return false;
-    return s.toLowerCase().includes(q);
-  };
-
-  const self =
-    match(props.item.name) ||
-    match(props.item.content) ||
-    match(props.item.memo);
-
-  if (self) return true;
-
-  if (props.item.is_group && props.item.children) {
-    // Recursive check helper
-    const check = (nodes: PsmItem[]): boolean => {
-      for (const n of nodes) {
-        if (!n) continue; // Safety guard
-        if (
-          match(n.name) ||
-          match(n.content) ||
-          match(n.memo)
-        ) {
-          return true;
-        }
-        // Deep recursion
-        if (n.is_group && n.children && check(n.children)) {
-           return true;
-        }
-      }
-      return false;
-    };
-    return check(props.item.children);
-  }
-  return false;
-});
+const matchesSearchQuery = computed(() => matchesQueryDeep(props.item, searchQuery.value.toLowerCase()));
 
 /**
  * 非表示グループ機能 (Phase 8): 自身が非表示グループで、
@@ -177,8 +140,9 @@ const handleGroupToggle = () => {
   requestToggleEnabled(props.item);
 };
 
+// 択一は配下の有効/無効の扱いを決める設定のため、親グループが無効でも切り替えられるようにする
 const handleGroupExclusiveToggle = (val: unknown) => {
-  if (props.isParentDisabled || effectiveLocked.value) return;
+  if (effectiveLocked.value) return;
   toggleGroupExclusive(props.item, typeof val === "boolean" ? val : undefined);
 };
 
