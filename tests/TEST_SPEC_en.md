@@ -62,6 +62,8 @@ Before each release (and after any UI-related change), reload the WebUI and chec
 | A-5 | Delete a file | After confirmation it disappears from the list, and another file (or an empty state) is shown | — |
 | A-6 | Open a YAML file and run "Convert to JSON (faster)" | A completion message appears and a `.json` file is added to the list (the original `.yaml` remains) | 2.2 Save Speed (Phase C) |
 | A-7 | Look near the panel title | The extension version is displayed | — |
+| A-8 | Open a file with duplicated or missing IDs (such as one imported from PNG Info), open another file, then open it again | Only the first time, a message saying that duplicated or missing IDs were reassigned and the file was saved appears at the bottom. It does not appear the second time, and the tree and profile results are the same as before the repair | 2.2 Item ID issuing and repair |
+| A-9 | Open a file in another tool's format (one using `group` / `items` / `prompt`), open the Positive pane, then open another file and open it again | Only the first time, a message saying the file was converted to the PSM format and saved appears at the bottom, and the pane shows the group names, prompts, and memos (the pane does not disappear). It does not appear the second time | 2.2 Conversion from another tool's format |
 
 #### B. Adding, Editing, and Deleting Items
 | No | Steps | Expected Result | Related unit tests |

@@ -132,7 +132,11 @@ export const ja = {
   viewFilterEnabledWithGroups: "有効 (グループ付き)",
   viewFilterEmpty: "表示する項目がありません",
   viewFilterApplying: "表示を切り替えています...",
-  
+
+  // 読み込み時の変換・IDの修復
+  idRepairDone: "「{file}」の {count} 件のIDが重複または欠けていたため、新しいIDを振り直して保存しました。",
+  fileConvertDone: "「{file}」は別のツールの形式だったため、{count} 件の項目を PSM の形式に変換して保存しました。",
+
   // File Dialogs
   createNewFile: "新規ファイル作成",
   fileName: "ファイル名",

@@ -1,6 +1,8 @@
 import { nextTick, reactive, toRaw, watch } from "vue";
-import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange, ViewFilterMode, DuplicateGroup, DuplicateOccurrence, DuplicatePathGroup } from "./types";
+import { PsmItem, DuplicateCheckMode, PsmProfile, PsmProfileState, ModelMode, TranslateSettings, TranslateProfile, PsmCategory, GenerationFieldId, PsmGenerationProfile, ParentActivationMode, ParentActivationNotice, EnabledChange, ViewFilterMode, DuplicateGroup, DuplicateOccurrence, DuplicatePathGroup, FileRepairNotice } from "./types";
 import { Logger, setDebugMode } from "./log";
+import { createItemId, repairItemIds, reserveItemIds, ItemIdRepairInput } from "./itemId";
+import { convertForeignNodes } from "./foreignFormat";
 import { GENERATION_FIELDS, getActiveTabPrefix, captureGenerationSettings } from "./generationFields";
 
 /**
@@ -70,6 +72,8 @@ export const state = reactive({
   parentActivationMode: "confirm" as ParentActivationMode,
   /** 親グループが無効な項目の有効化に関する通知 (null の間は通知を表示しない) */
   parentActivationNotice: null as ParentActivationNotice | null,
+  /** 読み込んだファイルを PSM の形式への変換・IDの修復をして保存したことの通知 (null の間は通知を表示しない) */
+  fileRepairNotice: null as FileRepairNotice | null,
   /** 最後に選択されていたファイル名 */
   lastFile: "",
   /** 重みスライダーを表示するかどうか */
@@ -127,7 +131,7 @@ export const state = reactive({
 const cloneNodeRecursive = (node: PsmItem): PsmItem => {
   const newNode = {
     ...JSON.parse(JSON.stringify(node)),
-    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+    id: createItemId(),
   };
   if (newNode.is_group && newNode.children) {
     newNode.children = newNode.children.map((child: PsmItem) =>
@@ -290,7 +294,7 @@ export const cancelDelete = () => {
 export const addItem = (list: PsmItem[], is_group: boolean, atIndex?: number) => {
   if (isListLocked(list)) return;
   const newItem: PsmItem = {
-    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+    id: createItemId(),
     name: "",
     content: "",
     enabled: true,
@@ -1134,13 +1138,25 @@ export const loadPrompts = async () => {
     const res = await fetch(`/psm/get-prompts?file=${state.selectedFile}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    state.positive = (data.positive || []).filter((i: PsmItem) => i != null);
-    state.negative = (data.negative || []).filter((i: PsmItem) => i != null);
-    state.profiles = data.profiles || [];
+    // 別のツールの形式 (group / items / prompt) のファイルは、そのままでは表示できないため PSM の形式に変換する
+    const convertedPositive = convertForeignNodes(Array.isArray(data.positive) ? data.positive : []);
+    const convertedNegative = convertForeignNodes(Array.isArray(data.negative) ? data.negative : []);
+    const loaded: ItemIdRepairInput = {
+      positive: convertedPositive.nodes,
+      negative: convertedNegative.nodes,
+      profiles: data.profiles || [],
+    };
+    // 重複・欠損しているIDは、有効/無効の切り替えやプロファイルが別のアイテムに作用する原因になるため、読み込み時に直す
+    reserveItemIds([loaded.positive, loaded.negative]);
+    const repair = repairItemIds(loaded);
+    state.positive = repair.positive;
+    state.negative = repair.negative;
+    state.profiles = repair.profiles;
     state.modelMode = data.model_mode === "anima" ? "anima" : "sd"; // 未定義は "sd" (後方互換)
     state.selectedProfileName = "";
     // 通知が指すアイテムは読み込み前のツリーのものなので、元に戻す等の操作ができないよう閉じる
     state.parentActivationNotice = null;
+    state.fileRepairNotice = null;
     
     // 読み込まれたプロンプトデータの要約をテーブルとグループで可視化
     console.groupCollapsed(`[PSM][Store/Data] ファイル「${state.selectedFile}」から読み込まれたプロンプトツリー構造の要約を展開します。`);
@@ -1151,6 +1167,13 @@ export const loadPrompts = async () => {
       console.table(state.profiles.map(p => ({ "プロファイル名": p.name, "定義状態数": p.states.length })));
     }
     console.groupEnd();
+
+    await saveRepairedFile({
+      convertedCount: convertedPositive.convertedCount + convertedNegative.convertedCount,
+      duplicateCount: repair.duplicateCount,
+      missingCount: repair.missingCount,
+      droppedStateCount: repair.droppedStateCount,
+    });
 
     // last_fileを保存
     if (state.selectedFile !== state.lastFile) {
@@ -1163,6 +1186,45 @@ export const loadPrompts = async () => {
   } finally {
     stopLoading();
   }
+};
+
+/** 読み込み時に行った変換・修復の件数 */
+interface LoadRepairSummary {
+  /** 別のツールの形式から変換したノードの数 */
+  convertedCount: number;
+  /** IDが重複していたため振り直したノードの数 */
+  duplicateCount: number;
+  /** IDが無かったため振ったノードの数 */
+  missingCount: number;
+  /** どのノードにも対応しないため削除したプロファイルの状態の数 */
+  droppedStateCount: number;
+}
+
+/**
+ * 読み込み時に形式の変換やIDの修復をした場合は、すぐにファイルへ保存して通知する
+ * 保存しないと、開くたびに別の新しいIDが振られ、プロファイルとの対応がそのたびに変わってしまうため。
+ */
+const saveRepairedFile = async (summary: LoadRepairSummary): Promise<void> => {
+  const repairedCount = summary.duplicateCount + summary.missingCount;
+  if (summary.convertedCount === 0 && repairedCount === 0 && summary.droppedStateCount === 0) return;
+
+  const file = state.selectedFile;
+  Logger.warn(`[Store/Data] ファイル「${file}」に別のツールの形式のノード・重複や欠損しているID・どのアイテムにも対応しないプロファイルの状態のいずれかがあったため、修復して保存します。`, {
+    convertedCount: summary.convertedCount,
+    duplicateCount: summary.duplicateCount,
+    missingCount: summary.missingCount,
+    droppedProfileStateCount: summary.droppedStateCount,
+  });
+  await savePrompts();
+  // 削除したのが、どのアイテムにも対応しないプロファイルの状態だけの場合は、見た目が変わらないため通知しない
+  if (summary.convertedCount > 0 || repairedCount > 0) {
+    state.fileRepairNotice = { file, convertedCount: summary.convertedCount, repairedCount };
+  }
+};
+
+/** 読み込み時の変換・修復の通知を閉じる */
+export const dismissFileRepairNotice = (): void => {
+  state.fileRepairNotice = null;
 };
 
 /**
@@ -1213,13 +1275,11 @@ export const flushPromptsOnUnload = () => {
  * カテゴリ設定済みのグループ雛形と、Anima公式推奨の品質タグ/ネガティブを含む
  */
 export const buildAnimaTemplate = (): { positive: PsmItem[]; negative: PsmItem[] } => {
-  let seq = 0;
-  const nextId = () => Date.now() * 1000 + (seq++); // 連番で同ミリ秒内の衝突を防止
   const item = (content: string): PsmItem => ({
-    id: nextId(), name: "", content, enabled: true, weight: 1.0, memo: "", is_group: false,
+    id: createItemId(), name: "", content, enabled: true, weight: 1.0, memo: "", is_group: false,
   });
   const group = (name: string, category: PsmCategory, children: PsmItem[]): PsmItem => ({
-    id: nextId(), name, content: "", enabled: true, weight: 1.0, memo: "",
+    id: createItemId(), name, content: "", enabled: true, weight: 1.0, memo: "",
     is_group: true, isOpen: true, category, children,
   });
 
@@ -1799,7 +1859,7 @@ const parsePrompts = (raw: string): PsmItem[] => {
     .map((s) => s.trim())
     .filter((s) => s)
     .map((s) => ({
-      id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+      id: createItemId(),
       name: "",
       content: s,
       enabled: true,
@@ -1887,8 +1947,6 @@ export const parseInfotext = (raw: string): ParsedInfotext => {
 export const parsePromptToItems = (raw: string): PsmItem[] => {
   if (!raw || !raw.trim()) return [];
 
-  let seq = 0;
-  const nextId = () => Date.now() * 1000 + ((seq++) % 1000);
   const items: PsmItem[] = [];
 
   for (const segment of raw.replace(/\r\n?/g, "\n").split(",")) {
@@ -1935,7 +1993,7 @@ export const parsePromptToItems = (raw: string): PsmItem[] => {
     const isNatural = !isSpecial && (/[.!?]$/.test(text) || wordCount >= 6);
 
     items.push({
-      id: nextId(),
+      id: createItemId(),
       name: "",
       content: text,
       enabled: true,
@@ -1981,8 +2039,7 @@ const SUBDIVIDE_THRESHOLD = 8;
  */
 const subdivideGeneralItems = (
   items: PsmItem[],
-  subcategories: Record<string, string | null>,
-  nextId: () => number
+  subcategories: Record<string, string | null>
 ): PsmItem[] => {
   if (items.length < SUBDIVIDE_THRESHOLD) return items;
 
@@ -2001,7 +2058,7 @@ const subdivideGeneralItems = (
   return order
     .filter((k) => buckets.has(k))
     .map((k) => ({
-      id: nextId(),
+      id: createItemId(),
       name: k === "other" ? "その他" : (SUBCAT_LABELS[k] || k),
       content: "",
       enabled: true,
@@ -2155,13 +2212,11 @@ export const subdivideGroup = async (group: PsmItem, useAI = false): Promise<num
   try {
     const subcategories = await resolveSubcategories(leaves.map((l) => l.content.trim()), useAI);
 
-    let seq = 0;
-    const nextId = () => Date.now() * 1000 + 700 + ((seq++) % 300);
     // content のキーで引けるよう、trim済みキーに揃えたマップを作る
     const byContent: Record<string, string | null> = {};
     for (const l of leaves) byContent[l.content] = subcategories[l.content.trim()] || null;
 
-    const subgroups = subdivideGeneralItems(leaves, byContent, nextId);
+    const subgroups = subdivideGeneralItems(leaves, byContent);
     if (subgroups === leaves || subgroups.length === 0) return 0; // 細分化されなかった
 
     // 元の並び順を保ちつつ、葉アイテムのあった位置にサブグループを差し込む
@@ -2239,8 +2294,6 @@ export const groupItemsByCategory = async (items: PsmItem[], subdivideGeneral = 
     general: "一般",
   };
 
-  let seq = 0;
-  const nextId = () => Date.now() * 1000 + 500 + ((seq++) % 500);
   const buckets = new Map<PsmCategory, PsmItem[]>();
 
   for (const item of items) {
@@ -2256,7 +2309,7 @@ export const groupItemsByCategory = async (items: PsmItem[], subdivideGeneral = 
     .map((c) => {
       const children = buckets.get(c)!;
       return {
-        id: nextId(),
+        id: createItemId(),
         name: CAT_LABELS[c],
         content: "",
         enabled: true,
@@ -2267,7 +2320,7 @@ export const groupItemsByCategory = async (items: PsmItem[], subdivideGeneral = 
         category: c,
         // 「一般」は肥大化しやすいため、指定時のみサブ分類で細分化する
         children: (subdivideGeneral && c === "general")
-          ? subdivideGeneralItems(children, subcategories, nextId)
+          ? subdivideGeneralItems(children, subcategories)
           : children,
       };
     });

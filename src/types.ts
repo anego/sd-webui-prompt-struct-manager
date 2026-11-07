@@ -3,7 +3,7 @@
  * グループとプロンプト（葉ノード）の両方を表現します。
  */
 export interface PsmItem {
-  /** ユニークID (Date.now() + Math.random()) */
+  /** ファイル内で一意なID (新規は itemId.ts の createItemId で発行する。古いファイルには文字列のIDもある) */
   id: number;
   /** 表示名 (グループ名やプロンプトの別名) */
   name: string;
@@ -152,6 +152,16 @@ export type ViewFilterMode = "all" | "enabled" | "enabledWithGroups";
  * - "auto": 祖先グループも自動で有効にし、通知から元に戻せるようにする
  */
 export type ParentActivationMode = "none" | "confirm" | "auto";
+
+/** 読み込んだファイルを PSM の形式への変換・IDの修復をして保存したことの通知内容 */
+export interface FileRepairNotice {
+  /** 修復したファイル名 */
+  file: string;
+  /** 別のツールの形式から PSM の形式へ変換したノードの数 */
+  convertedCount: number;
+  /** IDが重複または欠損していたため、新しいIDを振ったノードの数 */
+  repairedCount: number;
+}
 
 /** 有効/無効を変更したアイテムの、変更前の状態 (元に戻す用) */
 export interface EnabledChange {

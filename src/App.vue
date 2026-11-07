@@ -25,6 +25,7 @@ import {
   deleteGenerationProfile,
   switchViewFilterMode,
   isViewFilterMode,
+  dismissFileRepairNotice,
 } from "./store";
 import { PsmItem } from "./types";
 import { GENERATION_FIELDS } from "./generationFields";
@@ -104,6 +105,24 @@ const handleDeleteProfile = async () => {
 
 // 生成設定プロファイル: 適用はツールバーのプルダウン選択で即時実行、保存/削除は別ボタンから行う
 const genProfileSnackbar = ref({ show: false, text: "", color: "success" as "success" | "warning" });
+
+/**
+ * 読み込んだファイルを変換・修復して保存したことの通知文
+ * 別のツールの形式から変換した場合は、IDもすべて振り直しているため、変換したことだけを伝える。
+ */
+const fileRepairText = computed((): string => {
+  const notice = state.fileRepairNotice;
+  if (!notice) return "";
+  if (notice.convertedCount > 0) {
+    return t("fileConvertDone", { file: notice.file, count: String(notice.convertedCount) });
+  }
+  return t("idRepairDone", { file: notice.file, count: String(notice.repairedCount) });
+});
+
+/** スナックバーが時間切れなどで閉じられたら、通知も閉じる */
+const handleFileRepairSnackbar = (open: boolean): void => {
+  if (!open) dismissFileRepairNotice();
+};
 
 const genFieldLabel = (id: string): string => {
   const def = GENERATION_FIELDS.find((f) => f.id === id);
@@ -858,6 +877,15 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
         attach
         data-testid="gen-profile-snackbar"
       >{{ genProfileSnackbar.text }}</v-snackbar>
+
+      <v-snackbar
+        :model-value="!!state.fileRepairNotice"
+        color="warning"
+        timeout="8000"
+        attach
+        data-testid="file-repair-snackbar"
+        @update:model-value="handleFileRepairSnackbar"
+      >{{ fileRepairText }}</v-snackbar>
 
       <PsmParentActivationNotice />
 

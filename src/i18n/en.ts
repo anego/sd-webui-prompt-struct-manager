@@ -131,7 +131,11 @@ export const en = {
   viewFilterEnabledWithGroups: "Enabled (with Groups)",
   viewFilterEmpty: "No items to display",
   viewFilterApplying: "Switching the view...",
-  
+
+  // Conversion and ID repair on load
+  idRepairDone: "{count} IDs in \"{file}\" were duplicated or missing, so new IDs were assigned and the file was saved.",
+  fileConvertDone: "\"{file}\" was in another tool's format, so {count} items were converted to the PSM format and the file was saved.",
+
   // File Dialogs
   createNewFile: "Create New File",
   fileName: "File Name",
